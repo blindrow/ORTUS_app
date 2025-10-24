@@ -728,11 +728,12 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _currentDate = DateTime(now.year, now.month, now.day);
-    _currentWeekDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Week view
-    _monthViewDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Month view
+    final today = DateTime(now.year, now.month, now.day);
+    _currentDate = today;
+    _currentWeekDate = today; // Отдельная дата для Week view
+    _monthViewDate = today; // Отдельная дата для Month view
     fullSchedule = ScheduleService.fetchSchedule();
-    _selectedDay = _currentDate;
+    _selectedDay = today;
     
     // Initialize drag oval animation controller
     _ovalSnapController = AnimationController(
