@@ -1,0 +1,5528 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:table_calendar/table_calendar.dart'; 
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:vibration/vibration.dart';
+import 'dart:math' as math;
+import 'dart:async';
+import 'dart:ui';
+import 'widgets/border_painters.dart';
+import 'widgets/border_loader_button.dart';
+
+enum LessonType { regular, online, exam, changed }
+enum LessonFormat { lecture, practice, lab }
+enum ScheduleViewMode { day, week, month }
+
+class Lesson {
+  final String time;
+  final String title;
+  final String teacher;
+  final String classroom;
+  final Color baseColor;
+  final LessonType type; 
+  final LessonFormat format;
+  final String? examNote;
+  final String deepLink;
+
+  const Lesson({
+    required this.time,
+    required this.title,
+    required this.teacher,
+    required this.classroom,
+    required this.baseColor,
+    required this.type,
+    required this.format,
+    this.examNote,
+    this.deepLink = '',
+  });
+}
+
+class DailySchedule {
+  final String day;
+  final DateTime date;
+  final List<Lesson> lessons;
+
+  DailySchedule({
+    required this.day,
+    required this.date,
+    required this.lessons,
+  });
+}
+
+// Painter для анимации загрузки по периметру рамки
+class _BorderLoadingPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _BorderLoadingPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      const Radius.circular(8),
+    );
+
+    final path = Path()..addRRect(rect);
+    final pathMetrics = path.computeMetrics().first;
+    final totalLength = pathMetrics.length;
+    
+    // Рисуем свечение (glow effect)
+    final glowPaint = Paint()
+      ..color = color.withOpacity( 0.3)
+      ..strokeWidth = 6
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    
+    final currentLength = totalLength * progress;
+    final glowPath = pathMetrics.extractPath(0, currentLength);
+    canvas.drawPath(glowPath, glowPaint);
+    
+    // Рисуем основную линию с градиентом
+    final mainPaint = Paint()
+      ..shader = LinearGradient(
+        colors: [
+          color.withOpacity( 0.4),
+          color,
+          color,
+        ],
+        stops: const [0.0, 0.7, 1.0],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final extractPath = pathMetrics.extractPath(0, currentLength);
+    canvas.drawPath(extractPath, mainPaint);
+    
+    // Рисуем яркую точку на конце (leading dot)
+    if (progress > 0 && progress < 1) {
+      final dotPosition = pathMetrics.getTangentForOffset(currentLength)?.position;
+      if (dotPosition != null) {
+        final dotPaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(dotPosition, 2.5, dotPaint);
+        
+        final dotGlowPaint = Paint()
+          ..color = color.withOpacity( 0.5)
+          ..style = PaintingStyle.fill
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+        canvas.drawCircle(dotPosition, 4, dotGlowPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BorderLoadingPainter oldDelegate) {
+    return oldDelegate.progress != progress;
+  }
+}
+
+class ScheduleService {
+  static List<DailySchedule> fetchSchedule() {
+    final now = DateTime.now();
+    final monday = now.subtract(Duration(days: now.weekday - 1)); // текущий понедельник
+    
+    List<DailySchedule> schedule = [];
+    
+    // Генерируем расписание на 8 недель (текущая + 3 назад + 4 вперед)
+    for (int weekOffset = -3; weekOffset <= 4; weekOffset++) {
+      final weekStart = monday.add(Duration(days: weekOffset * 7));
+      schedule.addAll(_generateWeekSchedule(weekStart, weekOffset));
+    }
+    
+    return schedule;
+  }
+  
+  static List<DailySchedule> _generateWeekSchedule(DateTime weekStart, int weekOffset) {
+    // Разное расписание для разных недель
+    bool isCurrentWeek = weekOffset == 0;
+    bool isPastWeek = weekOffset < 0;
+    
+    return [
+      DailySchedule(
+        day: 'Понедельник',
+        date: weekStart,
+        lessons: isCurrentWeek ? [
+          const Lesson(
+            time: '08:30 - 10:00',
+            title: 'Информационные системы',
+            teacher: 'Иванов А.С.',
+            classroom: 'Ауд. 301',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '10:15 - 11:45',
+            title: 'Английский язык (Онлайн)',
+            teacher: 'Петрова Е.Д.',
+            classroom: 'Zoom',
+            baseColor: Color(0xFFD4E6F1),
+            type: LessonType.online,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Дискретная математика',
+            teacher: 'Кузнецов В.П.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '14:00 - 15:30',
+            title: 'Операционные системы',
+            teacher: 'Петров А.Н.',
+            classroom: 'Ауд. 412',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '15:45 - 17:15',
+            title: 'Компьютерная графика',
+            teacher: 'Зайцев В.А.',
+            classroom: 'Ауд. 501',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '17:30 - 19:00',
+            title: 'Веб-технологии',
+            teacher: 'Соколов Д.В.',
+            classroom: 'Ауд. 401',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Дополнительный курс',
+            teacher: 'Морозов Д.И.',
+            classroom: 'Ауд. 102',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+            deepLink: 'com.microsoft.msapps://app123',
+          ),
+        ] : isPastWeek ? [
+          const Lesson(
+            time: '09:00 - 10:30',
+            title: 'Математика',
+            teacher: 'Смирнов Г.П.',
+            classroom: 'Ауд. 202',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '11:00 - 12:30',
+            title: 'История',
+            teacher: 'Орлов П.Т.',
+            classroom: 'Ауд. 305',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '13:00 - 14:30',
+            title: 'Физика',
+            teacher: 'Волков Н.М.',
+            classroom: 'Ауд. 108',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+        ] : [
+          const Lesson(
+            time: '08:30 - 10:00',
+            title: 'Физика',
+            teacher: 'Волков Н.М.',
+            classroom: 'Ауд. 108',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '10:15 - 11:45',
+            title: 'Химия',
+            teacher: 'Лебедева О.К.',
+            classroom: 'Лаб. 210',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'История',
+            teacher: 'Орлов П.Т.',
+            classroom: 'Ауд. 305',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+        ],
+      ),
+      DailySchedule(
+        day: 'Вторник',
+        date: weekStart.add(const Duration(days: 1)),
+        lessons: [
+          const Lesson(
+            time: '08:30 - 10:00',
+            title: 'Экономика предприятий (Лаб)',
+            teacher: 'Сидоров И.А.',
+            classroom: 'Лаб. 105',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '10:15 - 11:45',
+            title: 'Программирование',
+            teacher: 'Новиков С.Д.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+            examNote: '📝 Защита проекта',
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Базы данных',
+            teacher: 'Морозова Л.К.',
+            classroom: 'Ауд. 320',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '14:00 - 15:30',
+            title: 'Операционные системы',
+            teacher: 'Петров А.Н.',
+            classroom: 'Ауд. 412',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '15:45 - 17:15',
+            title: 'Компьютерная графика',
+            teacher: 'Зайцев В.А.',
+            classroom: 'Ауд. 501',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '17:30 - 19:00',
+            title: 'Теория алгоритмов',
+            teacher: 'Павлов К.Р.',
+            classroom: 'Ауд. 305',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Проектная работа',
+            teacher: 'Иванов А.С.',
+            classroom: 'Ауд. 301',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+        ],
+      ),
+      DailySchedule(
+        day: 'Среда',
+        date: weekStart.add(const Duration(days: 2)),
+        lessons: [
+          const Lesson(
+            time: '08:30 - 10:00',
+            title: 'Теория вероятностей',
+            teacher: 'Григорьев М.А.',
+            classroom: 'Ауд. 210',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '10:00 - 11:30',
+            title: 'Алгоритмы и структуры данных',
+            teacher: 'Павлов К.Р.',
+            classroom: 'Ауд. 305',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '11:00 - 12:30',
+            title: 'Философия',
+            teacher: 'Козлова В.И.',
+            classroom: 'Ауд. 410',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Компьютерные сети',
+            teacher: 'Федоров В.П.',
+            classroom: 'Ауд. 412',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '12:45 - 14:15',
+            title: 'Математический анализ',
+            teacher: 'Смирнов Г.П.',
+            classroom: 'Ауд. 202',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '14:30 - 16:00',
+            title: 'Физика',
+            teacher: 'Волков Н.М.',
+            classroom: 'Ауд. 108',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '16:15 - 17:45',
+            title: 'Искусственный интеллект',
+            teacher: 'Новиков С.Д.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Машинное обучение',
+            teacher: 'Новиков С.Д.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+        ],
+      ),
+      DailySchedule(
+        day: 'Четверг',
+        date: weekStart.add(const Duration(days: 3)),
+        lessons: [
+          const Lesson(
+            time: '09:00 - 10:30',
+            title: 'Сдача Долга по Физкультуре',
+            teacher: 'Тренер А.В.',
+            classroom: 'Спортзал',
+            baseColor: Color(0xFFF9E79F), 
+            type: LessonType.changed,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '11:00 - 12:30',
+            title: 'Веб-разработка',
+            teacher: 'Соколов Д.В.',
+            classroom: 'Ауд. 401',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '12:45 - 14:15',
+            title: 'Мобильная разработка',
+            teacher: 'Романов И.К.',
+            classroom: 'Ауд. 502',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '14:30 - 16:00',
+            title: 'Тестирование ПО',
+            teacher: 'Белова А.С.',
+            classroom: 'Ауд. 310',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '16:15 - 17:45',
+            title: 'Проектирование ИС',
+            teacher: 'Иванов А.С.',
+            classroom: 'Ауд. 301',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '18:00 - 19:30',
+            title: 'Безопасность ПО',
+            teacher: 'Белова А.С.',
+            classroom: 'Ауд. 310',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Кибербезопасность',
+            teacher: 'Белова А.С.',
+            classroom: 'Ауд. 310',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+        ],
+      ),
+      DailySchedule(
+        day: 'Пятница',
+        date: weekStart.add(const Duration(days: 4)),
+        lessons: [
+          const Lesson(
+            time: '08:30 - 10:00',
+            title: 'Английский язык',
+            teacher: 'Петрова Е.Д.',
+            classroom: 'Ауд. 205',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '10:00 - 11:30',
+            title: 'Алгоритмы и структуры данных',
+            teacher: 'Павлов К.Р.',
+            classroom: 'Ауд. 305',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Архитектура ПО',
+            teacher: 'Кузнецов В.П.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '14:30 - 16:00',
+            title: 'Экзамен по Информатике',
+            teacher: 'Иванов А.С.',
+            classroom: 'Ауд. 301',
+            baseColor: Color(0xFFD6EAF8), 
+            type: LessonType.exam,
+            format: LessonFormat.lecture,
+            examNote: '⚠️ Контрольная работа по алгоритмам',
+          ),
+          const Lesson(
+            time: '16:15 - 17:45',
+            title: 'Управление проектами',
+            teacher: 'Соколов Д.В.',
+            classroom: 'Ауд. 401',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '21:00 - 23:00',
+            title: 'Вечерний семинар по AI',
+            teacher: 'Новиков М.А.',
+            classroom: 'Онлайн',
+            baseColor: defaultColor,
+            type: LessonType.online,
+            format: LessonFormat.lecture,
+          ),
+        ],
+      ),
+      DailySchedule(
+        day: 'Суббота',
+        date: weekStart.add(const Duration(days: 5)),
+        lessons: isCurrentWeek ? [
+          const Lesson(
+            time: '10:00 - 11:30',
+            title: 'Дополнительная математика',
+            teacher: 'Смирнов Г.П.',
+            classroom: 'Ауд. 202',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Консультация по программированию',
+            teacher: 'Новиков С.Д.',
+            classroom: 'Ауд. 215',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '14:00 - 15:30',
+            title: 'Разработка игр',
+            teacher: 'Романов И.К.',
+            classroom: 'Ауд. 502',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '16:00 - 17:30',
+            title: 'Графический дизайн',
+            teacher: 'Зайцев В.А.',
+            classroom: 'Ауд. 501',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '18:00 - 19:30',
+            title: '3D моделирование',
+            teacher: 'Зайцев В.А.',
+            classroom: 'Ауд. 501',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lab,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Хакатон',
+            teacher: 'Команда преподавателей',
+            classroom: 'Ауд. 401',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+        ] : [],
+      ),
+      DailySchedule(
+        day: 'Воскресенье',
+        date: weekStart.add(const Duration(days: 6)),
+        lessons: isCurrentWeek ? [
+          const Lesson(
+            time: '10:00 - 11:30',
+            title: 'Йога и медитация',
+            teacher: 'Инструктор Светлана К.',
+            classroom: 'Спортзал',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '12:00 - 13:30',
+            title: 'Английский разговорный клуб',
+            teacher: 'Петрова Е.Д.',
+            classroom: 'Ауд. 205',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '14:00 - 15:30',
+            title: 'Шахматный турнир',
+            teacher: 'Студсовет',
+            classroom: 'Ауд. 101',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+          const Lesson(
+            time: '16:00 - 17:30',
+            title: 'Киноклуб',
+            teacher: 'Иванов А.С.',
+            classroom: 'Актовый зал',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.lecture,
+          ),
+          const Lesson(
+            time: '20:00 - 23:00',
+            title: 'Вечер настольных игр',
+            teacher: 'Студсовет',
+            classroom: 'Ауд. 301',
+            baseColor: defaultColor,
+            type: LessonType.regular,
+            format: LessonFormat.practice,
+          ),
+        ] : [],
+      ),
+    ];
+  }
+}
+
+
+const Color defaultColor = Color(0xFFE8F5E8);
+
+class SchedulePage extends StatefulWidget {
+  const SchedulePage({super.key});
+  
+  @override
+  _SchedulePageState createState() => _SchedulePageState();
+}
+
+class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  // State variables
+  late DateTime _currentDate; // Для Day view
+  late DateTime _currentWeekDate; // Для Week view (отдельная навигация)
+  late DateTime _monthViewDate; // Для Month view (отдельная навигация)
+  DateTime? _selectedDay; // Nullable для правильного отображения при первом открытии
+  DateTime? _previousSelectedDay; // ПУНКТ 22: Для анимации перемещения highlight
+  late DateTime _focusedDay;
+  late List<DailySchedule> fullSchedule;
+  ScheduleViewMode _viewMode = ScheduleViewMode.week;
+  ScheduleViewMode _previousViewMode = ScheduleViewMode.week;
+  final Map<DateTime, List<dynamic>> _events = {};
+  final Map<DateTime, List<int>> _expandedDays = {};
+  int _navigationDirection = 1; // 1 = вправо (вперед), -1 = влево (назад)
+  int _weekSwipeDirection = 1; // ПУНКТ 19: Направление свайпа для Week view
+  final Set<String> _expandedTiles = {}; // Отслеживание раскрытых свертков
+  final Set<String> _viewedExams = {}; // Отслеживание просмотренных контрольных
+  final Set<String> _seenExamDates = {}; // ПУНКТ 9: Отслеживание показанных SnackBar для контрольных
+  final Set<String> _openedOnlineLinks = {}; // ПУНКТ 13: Отслеживание открытых онлайн-ссылок
+  final Set<String> _vibrationFiredForDate = {}; // ПУНКТ 8: Debounce вибрации
+  Timer? _snackbarDebounceTimer;
+  final ScrollController _scrollController = ScrollController();
+  bool _isFirstLaunch = true; // Флаг первого запуска
+  bool _seenSessionVibration = false; // Флаг вибрации сессии
+  final Map<String, GlobalKey> _tileKeys = {}; // Ключи для плавного скролла к заголовкам дней (Неделя)
+  final Map<String, GlobalKey> _examLessonKeys = {}; // ПУНКТ 21: Ключи для уроков с контрольной
+  
+  // DRAG OVAL VARIABLES
+  bool _isDraggingOval = false;
+  double _ovalDragOffset = 0.0;
+  late AnimationController _ovalSnapController;
+  late Animation<double> _ovalSnapAnimation;
+
+  // Animation variables - ОТКЛЮЧЕНО
+  // double _indicatorWidth = 0;
+  // double _indicatorOffset = 0;
+  final GlobalKey _switcherKey = GlobalKey();
+  final GlobalKey _dayKey = GlobalKey();
+  final GlobalKey _weekKey = GlobalKey();
+  final GlobalKey _monthKey = GlobalKey();
+
+  // Getter for view mode
+  ScheduleViewMode get _currentMode => _viewMode;
+  
+  // Setter for view mode
+  set _currentMode(ScheduleViewMode mode) {
+    if (_viewMode != mode) {
+      debugPrint('EVENT: mode_switch | from: $_viewMode | to: $mode | timestamp: ${DateTime.now()}');
+      _previousViewMode = _viewMode;
+      setState(() {
+        _viewMode = mode;
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _currentDate = DateTime(now.year, now.month, now.day);
+    _currentWeekDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Week view
+    _monthViewDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Month view
+    _focusedDay = _currentDate;
+    fullSchedule = ScheduleService.fetchSchedule();
+    
+    // Инициализируем _selectedDay после первого кадра
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        _selectedDay = DateTime(now.year, now.month, now.day);
+      });
+    });
+    
+    // Initialize drag oval animation controller
+    _ovalSnapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _ovalSnapAnimation = Tween<double>(begin: 0, end: 0).animate(
+      CurvedAnimation(parent: _ovalSnapController, curve: Curves.easeOutCubic),
+    );
+    
+    // Initialize expanded days for the current week
+    final startOfWeek = _getStartOfWeek(_currentDate);
+    for (var i = 0; i < 7; i++) {
+      final day = startOfWeek.add(Duration(days: i));
+      _expandedDays[day] = [0, 1, 2, 3, 4, 5, 6]; // Expand all days by default
+    }
+    
+    // Первичная вибрация ОДИН РАЗ при cold start
+    if (!_seenSessionVibration) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final hasVibrator = await Vibration.hasVibrator() ?? false;
+        if (hasVibrator) {
+          Vibration.vibrate(duration: 60);
+          _seenSessionVibration = true;
+          debugPrint('EVENT: session_vibration | timestamp: ${DateTime.now()}');
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _snackbarDebounceTimer?.cancel();
+    _ovalSnapController.dispose();
+    super.dispose();
+  }
+
+  void _showExamSnackBar(String examNote) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.description_outlined, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                examNote,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF409187),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+        duration: const Duration(seconds: 5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        action: SnackBarAction(
+          label: 'ПОКАЗАТЬ',
+          textColor: Colors.white,
+          backgroundColor: Colors.white.withOpacity(0.2),
+          onPressed: () {
+            // Прокрутка к контрольной будет добавлена позже
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showDayPickerDialog() {
+    debugPrint('EVENT: quickjump_open | screen: day | timestamp: ${DateTime.now()}');
+    final activeColor = const Color(0xFF409187);
+    final normalizedToday = _normalizeDate(DateTime.now());
+    DateTime displayWeekStart = _getStartOfWeek(_currentDate);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 30),
+          child: StatefulBuilder(builder: (context, setStateDialog) {
+            final displayWeekEnd = displayWeekStart.add(const Duration(days: 6));
+            
+            // Определяем цвета для стрелок
+            final prevWeekStart = displayWeekStart.subtract(const Duration(days: 7));
+            final nextWeekStart = displayWeekStart.add(const Duration(days: 7));
+            final isPrevWeekCurrent = normalizedToday.isAfter(prevWeekStart.subtract(const Duration(days: 1))) && 
+                                      normalizedToday.isBefore(prevWeekStart.add(const Duration(days: 7)));
+            final isNextWeekCurrent = normalizedToday.isAfter(nextWeekStart.subtract(const Duration(days: 1))) && 
+                                      normalizedToday.isBefore(nextWeekStart.add(const Duration(days: 7)));
+
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Верх: стрелки + диапазон недели
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Стрелка назад (с кругом)
+                      InkWell(
+                        onTap: () {
+                          setStateDialog(() {
+                            displayWeekStart = displayWeekStart.subtract(const Duration(days: 7));
+                          });
+                          setState(() {
+                            _currentDate = displayWeekStart;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(50),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isPrevWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
+                            border: Border.all(
+                              color: isPrevWeekCurrent ? activeColor : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 3),
+                              child: Icon(
+                                Icons.arrow_back_ios,
+                                size: 16,
+                                color: isPrevWeekCurrent ? activeColor : Colors.grey.shade600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Диапазон недели
+                      Text(
+                        '${_formatDate(displayWeekStart)} – ${_formatDate(displayWeekEnd)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+
+                      // Стрелка вперед (с кругом)
+                      InkWell(
+                        onTap: () {
+                          setStateDialog(() {
+                            displayWeekStart = displayWeekStart.add(const Duration(days: 7));
+                          });
+                          setState(() {
+                            _currentDate = displayWeekStart;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(50),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isNextWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
+                            border: Border.all(
+                              color: isNextWeekCurrent ? activeColor : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                              color: isNextWeekCurrent ? activeColor : Colors.grey.shade600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // 7 кнопок дней недели
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: List.generate(7, (index) {
+                      final day = displayWeekStart.add(Duration(days: index));
+                      final normalizedDay = _normalizeDate(day);
+                      final isToday = normalizedDay == normalizedToday;
+                      final dayName = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][index];
+
+                      final dayIsCurrentMonth = day.month == DateTime.now().month && day.year == DateTime.now().year;
+                      final isSelected = _selectedDay != null && normalizedDay == _normalizeDate(_selectedDay!);
+                      final isCurrentDate = normalizedDay == _normalizeDate(_currentDate);
+
+                      // Определяем цвета
+                      Color textColor;
+                      Color borderColor;
+                      Color backgroundColor;
+
+                      // Фон всегда на текущем дне (isToday)
+                      backgroundColor = isToday ? activeColor.withOpacity( 0.2) : Colors.transparent;
+                      
+                      // Обводка на выбранном дне (isCurrentDate)
+                      if (isCurrentDate) {
+                        borderColor = activeColor;
+                        textColor = dayIsCurrentMonth ? activeColor : Colors.grey.shade600;
+                      } else if (isToday) {
+                        // Если сегодня, но не выбран - серая обводка
+                        borderColor = Colors.grey.shade400;
+                        textColor = activeColor;
+                      } else {
+                        // Обычный день
+                        borderColor = Colors.grey.shade300;
+                        textColor = dayIsCurrentMonth ? activeColor : Colors.grey.shade600;
+                      }
+
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () {
+                              setState(() {
+                                _currentDate = normalizedDay;
+                                _selectedDay = normalizedDay;
+                              });
+                              Navigator.of(context).pop();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: backgroundColor,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: borderColor,
+                                  width: 2,
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    dayName,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    day.day.toString(),
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
+
+
+  void _showWeekPickerDialog() {
+    debugPrint('EVENT: quickjump_open | screen: week | timestamp: ${DateTime.now()}');
+    final activeColor = const Color(0xFF409187);
+    final greyColor = const Color(0xFF757575);
+    final currentMonth = DateTime.now().month;
+    final currentYear = DateTime.now().year;
+    
+    // Начинаем с текущего месяца Week view
+    DateTime displayMonth = DateTime(_currentWeekDate.year, _currentWeekDate.month, 1);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+          child: StatefulBuilder(builder: (context, setStateDialog) {
+            // Получаем все недели месяца
+            List<Map<String, DateTime>> getWeeksInMonth(DateTime month) {
+              final firstDay = DateTime(month.year, month.month, 1);
+              final lastDay = DateTime(month.year, month.month + 1, 0);
+              
+              // Находим понедельник первой недели
+              DateTime weekStart = _getStartOfWeek(firstDay);
+              List<Map<String, DateTime>> weeks = [];
+              
+              while (weekStart.isBefore(lastDay) || weekStart.isAtSameMomentAs(lastDay)) {
+                final weekEnd = weekStart.add(const Duration(days: 6));
+                weeks.add({'start': weekStart, 'end': weekEnd});
+                weekStart = weekStart.add(const Duration(days: 7));
+              }
+              
+              return weeks;
+            }
+
+            final weeks = getWeeksInMonth(displayMonth);
+            final isCurrentMonth = displayMonth.month == currentMonth && displayMonth.year == currentYear;
+            final firstDay = DateTime(displayMonth.year, displayMonth.month, 1);
+            final lastDay = DateTime(displayMonth.year, displayMonth.month + 1, 0);
+
+            return Container(
+              constraints: const BoxConstraints(maxWidth: 300),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Верх: стрелки + месяц и промежуток
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      InkWell(
+                        onTap: () {
+                          setStateDialog(() {
+                            displayMonth = DateTime(displayMonth.year, displayMonth.month - 1, 1);
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(50),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 3),
+                              child: Icon(
+                                Icons.arrow_back_ios,
+                                size: 14,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      Expanded(
+                        child: Column(
+                          children: [
+                            // Название месяца (с заглавной буквы)
+                            Text(
+                              _capitalize(DateFormat('MMMM', 'ru_RU').format(displayMonth)),
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: isCurrentMonth ? activeColor : greyColor,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            // Промежуток месяца
+                            Text(
+                              '${_formatDate(firstDay)} – ${_formatDate(lastDay)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isCurrentMonth ? activeColor : greyColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      InkWell(
+                        onTap: () {
+                          setStateDialog(() {
+                            displayMonth = DateTime(displayMonth.year, displayMonth.month + 1, 1);
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(50),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.grey.shade300,
+                              width: 2,
+                            ),
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.arrow_forward_ios,
+                              size: 14,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Список недель
+                  ...weeks.map((week) {
+                    final weekStart = week['start']!;
+                    final weekEnd = week['end']!;
+                    final weekStartNorm = _normalizeDate(weekStart);
+                    
+                    // Проверяем, является ли это реальной текущей неделей (с today)
+                    final today = _normalizeDate(DateTime.now());
+                    final todayWeekStart = _getStartOfWeek(DateTime.now());
+                    final isRealCurrentWeek = weekStartNorm == _normalizeDate(todayWeekStart);
+                    
+                    // Проверяем, является ли это выбранной неделей
+                    final selectedWeekStart = _getStartOfWeek(_currentWeekDate);
+                    final isSelectedWeek = weekStartNorm == _normalizeDate(selectedWeekStart);
+
+                    // Определяем цвета для начала и конца недели
+                    final startIsCurrentMonth = weekStart.month == currentMonth && weekStart.year == currentYear;
+                    final endIsCurrentMonth = weekEnd.month == currentMonth && weekEnd.year == currentYear;
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
+                          setState(() {
+                            _currentWeekDate = weekStart;
+                          });
+                          Navigator.of(context).pop();
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: isRealCurrentWeek ? activeColor.withOpacity( 0.1) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelectedWeek ? activeColor : (isRealCurrentWeek ? Colors.grey.shade400 : Colors.grey.shade400),
+                              width: 2,
+                            ),
+                          ),
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: _formatDate(weekStart),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: startIsCurrentMonth ? activeColor : greyColor,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: ' – ',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: _formatDate(weekEnd),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: endIsCurrentMonth ? activeColor : greyColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
+  void _showPowerAppsDialog() async {
+    debugPrint('EVENT: powerapps_dialog_open | timestamp: ${DateTime.now()}');
+    
+    // Показываем диалог подтверждения
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Крупный квадрат с логотипом (КЛИКАБЕЛЬНЫЙ)
+                InkWell(
+                  onTap: () {
+                    Navigator.of(context).pop(true);
+                  },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF742774),
+                          Color(0xFFD946A0),
+                        ],
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.apps,
+                      size: 60,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Текст
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Открыть Power Apps?',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // Кнопка ОТКРЫТЬ (С ГРАДИЕНТОМ)
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(25),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF742774),
+                          Color(0xFFD946A0),
+                        ],
+                      ),
+                    ),
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop(true);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        shadowColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        'ОТКРЫТЬ',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    
+    // Если пользователь подтвердил открытие
+    if (shouldOpen == true) {
+      debugPrint('EVENT: powerapps_launch_confirmed | timestamp: ${DateTime.now()}');
+      await _launchPowerApps();
+    } else {
+      debugPrint('EVENT: powerapps_launch_cancelled | timestamp: ${DateTime.now()}');
+    }
+  }
+  
+  Future<void> _launchPowerApps() async {
+    // Пробуем несколько вариантов URL схем для PowerApps
+    final powerAppsUrls = [
+      Uri.parse('com.microsoft.msapps://'),
+      Uri.parse('powerapps://'),
+      Uri.parse('ms-apps://'),
+    ];
+    
+    bool launched = false;
+    
+    for (final url in powerAppsUrls) {
+      try {
+        if (await canLaunchUrl(url)) {
+          await launchUrl(
+            url,
+            mode: LaunchMode.externalApplication,
+          );
+          launched = true;
+          debugPrint('PowerApps launched with: $url');
+          break;
+        }
+      } catch (e) {
+        debugPrint('Failed to launch with $url: $e');
+        continue;
+      }
+    }
+    
+    // Если не удалось запустить - показываем snackbar
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Приложение Power Apps не установлено')),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Установить',
+            textColor: Colors.white,
+            onPressed: () async {
+              debugPrint('EVENT: powerapps_install_clicked | timestamp: ${DateTime.now()}');
+              final storeUrl = Uri.parse('https://play.google.com/store/apps/details?id=com.microsoft.msapps');
+              try {
+                await launchUrl(storeUrl, mode: LaunchMode.externalApplication);
+              } catch (e) {
+                debugPrint('Failed to open store URL: $e');
+              }
+            },
+          ),
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFE67E22),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+        ),
+      );
+    }
+  }
+  
+  void _showPowerAppsDialogOld() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity( 0.6),
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity( 0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ПУНКТ 20: Крестик удалён, закрытие по тапу на фон
+                    InkWell(
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        debugPrint('PowerApps открывается...');
+                      },
+                      borderRadius: BorderRadius.circular(25),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(25),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Color(0xFF742774),
+                              Color(0xFFD946A0),
+                            ],
+                          ),
+                        ),
+                        child: const Text(
+                          'Открыть',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMonthPickerDialog() {
+    debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
+    final now = DateTime.now();
+    int selectedYear = _monthViewDate.year;
+    int selectedMonth = _monthViewDate.month;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black.withOpacity( 0.5),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return ScaleTransition(
+              scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
+              child: FadeTransition(
+                opacity: animation,
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity( 0.2),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              IconButton(
+                                icon: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
+                                  ),
+                                  child: const Icon(Icons.chevron_left, color: Color(0xFF409187)),
+                                ),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    selectedYear--;
+                                  });
+                                },
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  color: selectedYear == now.year 
+                                      ? const Color(0xFF409187)
+                                      : Colors.grey.shade200,
+                                ),
+                                child: Text(
+                                  '$selectedYear',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: selectedYear == now.year ? Colors.white : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
+                                  ),
+                                  child: const Icon(Icons.chevron_right, color: Color(0xFF409187)),
+                                ),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    selectedYear++;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              childAspectRatio: 2.5,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                            ),
+                            itemCount: 12,
+                            itemBuilder: (context, index) {
+                              final month = index + 1;
+                              final isCurrentMonth = month == now.month && selectedYear == now.year;
+                              final isSelected = month == selectedMonth && selectedYear == _monthViewDate.year;
+                              final isCurrentYear = selectedYear == now.year;
+                              
+                              return InkWell(
+                                onTap: () {
+                                  setDialogState(() {
+                                    selectedMonth = month;
+                                  });
+                                  setState(() {
+                                    _monthViewDate = DateTime(selectedYear, month, 1);
+                                  });
+                                  Navigator.pop(context);
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeInOutCubic,
+                                  decoration: BoxDecoration(
+                                    color: isCurrentMonth 
+                                        ? const Color(0xFF409187)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isSelected 
+                                          ? const Color(0xFF409187)
+                                          : (isCurrentYear ? const Color(0xFF409187).withOpacity( 0.3) : Colors.grey.shade300),
+                                      width: isSelected ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      DateFormat('MMM', 'ru').format(DateTime(2024, month)),
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: isSelected || isCurrentMonth ? FontWeight.bold : FontWeight.normal,
+                                        color: isCurrentMonth 
+                                            ? Colors.white
+                                            : (isCurrentYear ? const Color(0xFF409187) : Colors.grey.shade600),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showTeacherInfo(String teacherName) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity( 0.6),
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity( 0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 70,
+                          height: 70,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF409187).withOpacity( 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.person,
+                            size: 40,
+                            color: Color(0xFF409187),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            teacherName,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 24, thickness: 1),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                          InkWell(
+                            onTap: () {
+                              final email = '${teacherName.toLowerCase().replaceAll(' ', '.')}@university.lv';
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Почта скопирована: $email'),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                  backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.email_outlined, size: 16, color: Color(0xFF409187)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '${teacherName.toLowerCase().replaceAll(' ', '.')}@university.lv',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black87,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.copy, size: 14, color: Color(0xFF409187)),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Преподаёт:',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildSubjectChip('Информационные системы'),
+                              const SizedBox(height: 8),
+                              _buildSubjectChip('Базы данных'),
+                              const SizedBox(height: 8),
+                              _buildSubjectChip('Программирование'),
+                            ],
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubjectChip(String subject) {
+    return InkWell(
+      onTap: () {
+        debugPrint('EVENT: subject_tap | screen: teacher_modal | subject: $subject | timestamp: ${DateTime.now()}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Загрузка: $subject'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFF409187),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF409187).withOpacity( 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF409187).withOpacity( 0.3),
+            width: 1,
+          ),
+        ),
+        child: Text(
+          subject,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF409187),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+    Widget _buildMiniWeekCalendar() {
+      final startOfWeek = _getStartOfWeek(_currentDate);
+      final endOfWeek = startOfWeek.add(const Duration(days: 6));
+      final today = _normalizeDate(DateTime.now());
+
+      final weekRangeText = '${_formatDate(startOfWeek)} - ${_formatDate(endOfWeek)}';
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Диапазон недели
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6.0),
+            child: Text(
+              weekRangeText,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+          // Дни недели
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(7, (index) {
+              final day = startOfWeek.add(Duration(days: index));
+              final isToday = day == today;
+              final isSelected = _selectedDay != null && day == _selectedDay;
+              final isCurrentMonth = day.month == _currentDate.month;
+
+              final dayName = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][day.weekday - 1];
+              final dayNumber = day.day.toString();
+
+              Color textColor = isCurrentMonth ? Colors.green : const Color(0xFF9E9E9E);
+              if (isToday || isSelected) textColor = Colors.white;
+
+              BoxDecoration decoration = BoxDecoration();
+              if (isToday) {
+                decoration = BoxDecoration(
+                  color: Colors.green,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF388E3C), width: 2),
+                );
+              } else if (isSelected) {
+                decoration = BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green, width: 2),
+                );
+              }
+
+              return Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    setState(() {
+                      _selectedDay = day;
+                      _currentDate = day;
+                    });
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: decoration,
+                    child: Column(
+                      children: [
+                        Text(
+                          dayName,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          dayNumber,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      );
+    }
+
+ 
+ 
+  @override
+  bool get wantKeepAlive => true;
+
+  // Helper method to get schedule for a specific date
+  DailySchedule _getScheduleForDate(DateTime date) {
+    final normalizedDate = _normalizeDate(date);
+    
+    // Ищем расписание по дате
+    for (var schedule in fullSchedule) {
+      if (_normalizeDate(schedule.date) == normalizedDate) {
+        return schedule;
+      }
+    }
+    
+    // Если не найдено, возвращаем пустое расписание
+    return DailySchedule(
+      day: DateFormat('EEEE', 'ru_RU').format(date),
+      date: date,
+      lessons: [],
+    );
+  }
+  
+  String _getWeekdayName(int weekday) {
+    switch (weekday) {
+      case DateTime.monday: return 'Понедельник';
+      case DateTime.tuesday: return 'Вторник';
+      case DateTime.wednesday: return 'Среда';
+      case DateTime.thursday: return 'Четверг';
+      case DateTime.friday: return 'Пятница';
+      case DateTime.saturday: return 'Суббота';
+      case DateTime.sunday: return 'Воскресенье';
+      default: return '';
+    }
+  }
+
+  void _updateIndicatorPosition() {
+    // ОТКЛЮЧЕНО - вызывало ошибки attached
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   final buttonKey = _getKeyForMode(_currentMode);
+    //   final buttonRenderBox = buttonKey.currentContext?.findRenderObject() as RenderBox?;
+    //   final switcherRenderBox = _switcherKey.currentContext?.findRenderObject() as RenderBox?;
+
+    //   if (buttonRenderBox != null && switcherRenderBox != null && switcherRenderBox.hasSize) {
+    //     setState(() {
+    //       _indicatorWidth = buttonRenderBox.size.width - 2.5;
+    //       final buttonGlobalPos = buttonRenderBox.localToGlobal(Offset.zero).dx;
+    //       final switcherGlobalPos = switcherRenderBox.localToGlobal(Offset.zero).dx;
+    //       _indicatorOffset = (buttonGlobalPos - switcherGlobalPos) - 4.0;
+    //     });
+    //   }
+    // });
+  }
+
+  GlobalKey _getKeyForMode(ScheduleViewMode mode) {
+    switch (mode) {
+      case ScheduleViewMode.day: return _dayKey;
+      case ScheduleViewMode.week: return _weekKey;
+      case ScheduleViewMode.month: return _monthKey;
+    }
+  }
+
+  DateTime _normalizeDate(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  void _changeDay(int delta) {
+    debugPrint('EVENT: day_change | screen: day | delta: $delta | timestamp: ${DateTime.now()}');
+    final oldDate = _currentDate;
+    setState(() {
+      _navigationDirection = delta;
+      _currentDate = _normalizeDate(_currentDate.add(Duration(days: delta)));
+    });
+    
+    _checkSkippedExams(oldDate, _currentDate);
+  }
+  
+  void _checkSkippedExams(DateTime fromDate, DateTime toDate) {
+    if ((toDate.difference(fromDate).inDays).abs() <= 1) return;
+    
+    _snackbarDebounceTimer?.cancel();
+    _snackbarDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+      final start = fromDate.isBefore(toDate) ? fromDate : toDate;
+      final end = fromDate.isAfter(toDate) ? fromDate : toDate;
+      
+      for (int i = 1; i < end.difference(start).inDays; i++) {
+        final checkDate = start.add(Duration(days: i));
+        final daily = _getScheduleForDate(checkDate);
+        
+        for (final lesson in daily.lessons) {
+          if (lesson.examNote != null) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text('Контрольная по ${lesson.title}'),
+                  ),
+                ],
+              ),
+              action: SnackBarAction(
+                label: 'Показать',
+                textColor: Colors.white,
+                onPressed: () async {
+                  setState(() {
+                    _currentDate = checkDate;
+                  });
+                  
+                  // Ждём обновления UI
+                  await Future.delayed(const Duration(milliseconds: 300));
+                  
+                  // Вибрация
+                  final hasVibrator = await Vibration.hasVibrator() ?? false;
+                  if (hasVibrator) {
+                    Vibration.vibrate(duration: 200);
+                  }
+                  
+                  // TODO: Добавить автоскролл к уроку с контрольной
+                  // Нужен ScrollController для реализации
+                },
+              ),
+              duration: const Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: const Color(0xFFE67E22),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+            ),
+          );
+            return;
+          }
+        }
+      }
+    });
+  }
+
+  void _snapOvalToNearest() {
+    // Определяем ближайшую вкладку на основе offset
+    final RenderBox? renderBox = _switcherKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    
+    final width = renderBox.size.width;
+    final buttonWidth = (width - 6) / 3;
+    
+    ScheduleViewMode targetMode;
+    if (_ovalDragOffset < -buttonWidth / 2) {
+      // Свайп влево
+      targetMode = _currentMode == ScheduleViewMode.month 
+          ? ScheduleViewMode.week 
+          : (_currentMode == ScheduleViewMode.week ? ScheduleViewMode.day : ScheduleViewMode.day);
+    } else if (_ovalDragOffset > buttonWidth / 2) {
+      // Свайп вправо
+      targetMode = _currentMode == ScheduleViewMode.day 
+          ? ScheduleViewMode.week 
+          : (_currentMode == ScheduleViewMode.week ? ScheduleViewMode.month : ScheduleViewMode.month);
+    } else {
+      // Возврат на текущую
+      targetMode = _currentMode;
+    }
+    
+    setState(() {
+      _previousViewMode = _currentMode;
+      _currentMode = targetMode;
+      _ovalDragOffset = 0.0;
+    });
+    
+    debugPrint('EVENT: oval_snap | to: $targetMode | timestamp: ${DateTime.now()}');
+  }
+
+  void _changeWeek(int delta) {
+    setState(() {
+      _navigationDirection = delta;
+      _currentWeekDate = _currentWeekDate.add(Duration(days: delta * 7));
+    });
+  }
+
+  String _formatDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final year = date.year.toString().substring(2);
+    return '$day.$month.$year';
+  }
+
+  String _capitalize(String text) {
+    if (text.isEmpty) return text;
+    return text[0].toUpperCase() + text.substring(1);
+  }
+
+  DateTime _getStartOfWeek(DateTime date) {
+    int diff = date.weekday - 1; 
+    return _normalizeDate(date.subtract(Duration(days: diff)));
+  }
+  
+  // ============================================================================
+  // ПУНКТ 9 & 21: SnackBar для контрольных с прокруткой к уроку
+  // ============================================================================
+  void _maybeShowExamSnackbar(BuildContext context, DateTime date, String examKey) {
+    if (!mounted) return;
+    final key = DateFormat('yyyy-MM-dd').format(date);
+    if (_seenExamDates.contains(key)) return;
+    _seenExamDates.add(key);
+
+    debugPrint('EVENT: exam_snackbar_shown | date: $key | timestamp: ${DateTime.now()}');
+
+    // ПУНКТ 11: Убрать дублирование SnackBar
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(child: Text('Контрольная работа в этот день')),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'Показать',
+          textColor: Colors.white,
+          onPressed: () {
+            // ПУНКТ 21: Корректный скролл с GlobalKey
+            final lessonKey = _examLessonKeys[examKey];
+            if (lessonKey?.currentContext != null) {
+              Scrollable.ensureVisible(
+                lessonKey!.currentContext!,
+                duration: const Duration(milliseconds: 600),
+                curve: Curves.easeInOutCubic,
+                alignment: 0.5, // По центру экрана
+              );
+              debugPrint('EVENT: exam_scrolled | key: $examKey');
+            } else {
+              debugPrint('ERROR: exam_key_not_found | key: $examKey');
+            }
+          },
+        ),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+      ),
+    );
+  }
+
+  // ============================================================================
+  // ПУНКТ 13: SnackBar при открытии онлайн-ссылок
+  // ============================================================================
+  void _openOnlineLink(BuildContext context, String url, String classroom) async {
+    if (!_openedOnlineLinks.contains(url)) {
+      _openedOnlineLinks.add(url);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF409187).withOpacity( 0.18),
+            content: Text('Открывается ссылка: $classroom'),
+            action: SnackBarAction(
+              label: 'Перейти',
+              textColor: const Color(0xFF409187),
+              onPressed: () {
+                // Логика открытия ссылки
+                debugPrint('EVENT: online_link_open | url: $url | timestamp: ${DateTime.now()}');
+              },
+            ),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+          ),
+        );
+      }
+    }
+    
+    // Фактическое открытие ссылки (заглушка)
+    debugPrint('Opening online link: $url');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    const activeColor = Color(0xFF409187);
+
+    return Scaffold( 
+      appBar: AppBar(
+        title: Text('Расписание A41', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: activeColor,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildModeSwitcher(activeColor),
+              const SizedBox(height: 15),
+
+            if (_currentMode == ScheduleViewMode.day) ...[
+              _buildDayNavigator(context),
+              const SizedBox(height: 12),
+              _buildDayOfWeekDisplay(),
+            ] else if (_currentMode == ScheduleViewMode.week)
+              _buildWeekNavigator(context)
+            else
+              _buildMonthCalendar(context),
+
+            const SizedBox(height: 20),
+
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              transitionBuilder: (child, animation) {
+                // Определяем направление: День слева (-1), Неделя центр (0), Месяц справа (1)
+                double horizontalOffset = 0.0;
+                
+                if (_previousViewMode != _currentMode) {
+                  // День → Неделя: приходит справа
+                  if (_currentMode == ScheduleViewMode.week && _previousViewMode == ScheduleViewMode.day) {
+                    horizontalOffset = 1.0;
+                  }
+                  // День → Месяц: приходит справа
+                  else if (_currentMode == ScheduleViewMode.month && _previousViewMode == ScheduleViewMode.day) {
+                    horizontalOffset = 1.0;
+                  }
+                  // Неделя → День: приходит слева
+                  else if (_currentMode == ScheduleViewMode.day && _previousViewMode == ScheduleViewMode.week) {
+                    horizontalOffset = -1.0;
+                  }
+                  // Неделя → Месяц: приходит справа
+                  else if (_currentMode == ScheduleViewMode.month && _previousViewMode == ScheduleViewMode.week) {
+                    horizontalOffset = 1.0;
+                  }
+                  // Месяц → Неделя: приходит слева
+                  else if (_currentMode == ScheduleViewMode.week && _previousViewMode == ScheduleViewMode.month) {
+                    horizontalOffset = -1.0;
+                  }
+                  // Месяц → День: приходит слева
+                  else if (_currentMode == ScheduleViewMode.day && _previousViewMode == ScheduleViewMode.month) {
+                    horizontalOffset = -1.0;
+                  }
+                } else {
+                  // Навигация внутри режима (стрелки влево/вправо)
+                  // ИСПРАВЛЕНО: влево (-1) -> анимация влево (-1.0), вправо (1) -> анимация вправо (1.0)
+                  horizontalOffset = _navigationDirection.toDouble();
+                }
+                
+                final offsetAnimation = Tween<Offset>(
+                  begin: Offset(horizontalOffset, 0.0),
+                  end: Offset.zero,
+                ).animate(CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutCubic,
+                ));
+                
+                return SlideTransition(
+                  position: offsetAnimation,
+                  child: FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  ),
+                );
+              },
+              child: Container(
+                key: ValueKey('${_currentMode}_${_currentMode == ScheduleViewMode.day ? _currentDate.toString() : _currentWeekDate.toString()}'),
+                child: _currentMode == ScheduleViewMode.day || _currentMode == ScheduleViewMode.month
+                    ? _buildDayScheduleList(_currentDate)
+                    : _buildWeekScheduleList(),
+              ),
+            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 🚨 ИСПРАВЛЕННЫЙ ВИДЖЕТ: Серый фон и точная анимация
+  // В файле lib/schedule_page.dart замените _buildModeSwitcher на этот код:
+// В файле lib/schedule_page.dart замените _buildModeSwitcher на этот код:
+Widget _buildModeSwitcher(Color activeColor) {
+    // Зелёный цвет для обводки
+    final greenBorder = const Color(0xFF409187);
+
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        if (details.primaryVelocity! < 0) {
+          // Свайп влево - предыдущий режим (День)
+          if (_currentMode == ScheduleViewMode.week) {
+            setState(() {
+              _previousViewMode = _currentMode;
+              _currentMode = ScheduleViewMode.day;
+            });
+          } else if (_currentMode == ScheduleViewMode.month) {
+            setState(() {
+              _previousViewMode = _currentMode;
+              _currentMode = ScheduleViewMode.week;
+            });
+          }
+        } else if (details.primaryVelocity! > 0) {
+          // Свайп вправо - следующий режим (Месяц)
+          if (_currentMode == ScheduleViewMode.day) {
+            setState(() {
+              _previousViewMode = _currentMode;
+              _currentMode = ScheduleViewMode.week;
+            });
+          } else if (_currentMode == ScheduleViewMode.week) {
+            setState(() {
+              _previousViewMode = _currentMode;
+              _currentMode = ScheduleViewMode.month;
+              if (_selectedDay != null) {
+                _currentDate = _selectedDay!;
+              }
+            });
+          }
+        }
+      },
+      child: GestureDetector(
+        onLongPressStart: (_) {
+          setState(() => _isDraggingOval = true);
+          debugPrint('EVENT: oval_drag_start | timestamp: ${DateTime.now()}');
+        },
+        onPanUpdate: (details) {
+          if (_isDraggingOval) {
+            setState(() {
+              _ovalDragOffset += details.delta.dx;
+            });
+          }
+        },
+        onPanEnd: (_) {
+          if (_isDraggingOval) {
+            _snapOvalToNearest();
+            setState(() => _isDraggingOval = false);
+            debugPrint('EVENT: oval_drag_end | timestamp: ${DateTime.now()}');
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          key: _switcherKey,
+          padding: const EdgeInsets.all(3.0),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE0E0E0),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: greenBorder, width: 2.5),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final buttonWidth = (constraints.maxWidth - 6) / 3;
+              double leftPosition;
+              
+              if (_isDraggingOval) {
+                // При драге - используем offset
+                switch (_currentMode) {
+                  case ScheduleViewMode.day:
+                    leftPosition = 3 + _ovalDragOffset;
+                    break;
+                  case ScheduleViewMode.week:
+                    leftPosition = 3 + buttonWidth + _ovalDragOffset;
+                    break;
+                  case ScheduleViewMode.month:
+                    leftPosition = 3 + buttonWidth * 2 + _ovalDragOffset;
+                    break;
+                }
+                // Ограничиваем границы
+                leftPosition = leftPosition.clamp(3.0, 3.0 + buttonWidth * 2);
+              } else {
+                // Обычная позиция
+                switch (_currentMode) {
+                  case ScheduleViewMode.day:
+                    leftPosition = 3;
+                    break;
+                  case ScheduleViewMode.week:
+                    leftPosition = 3 + buttonWidth;
+                    break;
+                  case ScheduleViewMode.month:
+                    leftPosition = 3 + buttonWidth * 2;
+                    break;
+                }
+              }
+              
+              return Stack(
+                children: [
+                  // Анимированный овал-индикатор
+                  AnimatedPositioned(
+                    duration: _isDraggingOval ? Duration.zero : const Duration(milliseconds: 400),
+                    curve: Curves.easeInOutCubic,
+                    left: leftPosition,
+                    top: 3,
+                    bottom: 3,
+                    width: buttonWidth,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: greenBorder,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                    ),
+                  ),
+                  // Кнопки поверх индикатора
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildModeButton('День', ScheduleViewMode.day, _dayKey, greenBorder),
+                      _buildModeButton('Неделя', ScheduleViewMode.week, _weekKey, greenBorder),
+                      _buildModeButton('Месяц', ScheduleViewMode.month, _monthKey, greenBorder),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+}
+
+
+  // 🚨 ИСПРАВЛЕННЫЙ ВИДЖЕТ: Кнопка (вызывает обновление позиции)
+  // В файле lib/schedule_page.dart замените _buildModeButton на этот код:
+  Widget _buildModeButton(String title, ScheduleViewMode mode, GlobalKey key, Color greenBorder) {
+    final isActive = _currentMode == mode;
+    
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(30),
+        onTap: () {
+          setState(() {
+            _previousViewMode = _currentMode;
+            _currentMode = mode;
+            if (mode == ScheduleViewMode.month && _selectedDay != null) {
+              _currentDate = _selectedDay!;
+            }
+            _updateIndicatorPosition();
+          });
+        },
+        child: Container(
+          key: key, 
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          height: 40,
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 300),
+            style: TextStyle(
+              color: isActive ? Colors.white : greenBorder,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+            child: Text(title),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // ... (Остальные виджеты _buildDayNavigator, _buildWeekNavigator, и т.д. ниже)
+  
+  Widget _buildDayNavigator(BuildContext context) {
+    final normalizedToday = _normalizeDate(DateTime.now());
+    final normalizedCurrent = _currentDate;
+    final isToday = normalizedCurrent.difference(normalizedToday).inDays == 0;
+    final isCurrentMonth = _currentDate.month == DateTime.now().month && _currentDate.year == DateTime.now().year;
+    const activeColor = Color(0xFF409187);
+    const greyColor = Color(0xFF757575);
+
+    final dateText = _formatDate(_currentDate);
+
+    // Определяем цвета для даты
+    Color textColor;
+    Color? borderColor;
+    Color? backgroundColor;
+
+    if (isToday) {
+      // Текущий день = зеленый текст + зеленая обводка + зеленый фон
+      textColor = activeColor;
+      borderColor = activeColor;
+      backgroundColor = activeColor.withOpacity( 0.2);
+    } else if (isCurrentMonth) {
+      // Другие дни текущего месяца = зеленый текст + серая обводка
+      textColor = activeColor;
+      borderColor = greyColor;
+      backgroundColor = Colors.transparent;
+    } else {
+      // Другой месяц = серый текст + серая обводка
+      textColor = greyColor;
+      borderColor = greyColor;
+      backgroundColor = Colors.transparent;
+    }
+
+    // Определяем цвета для стрелок
+    final isPrevDayToday = _normalizeDate(_currentDate.subtract(const Duration(days: 1))) == normalizedToday;
+    final isNextDayToday = _normalizeDate(_currentDate.add(const Duration(days: 1))) == normalizedToday;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // Кнопка назад (с кругом)
+        InkWell(
+          onTap: () => _changeDay(-1),
+          borderRadius: BorderRadius.circular(50),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isPrevDayToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
+              border: Border.all(
+                color: isPrevDayToday ? activeColor : Colors.grey.shade300,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Icon(
+                    Icons.arrow_back_ios,
+                    key: ValueKey(isPrevDayToday),
+                    size: 18,
+                    color: isPrevDayToday ? activeColor : Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Центральная дата + диалог выбора (овальная обводка)
+        GestureDetector(
+          onTap: _showDayPickerDialog,
+          onHorizontalDragEnd: (details) {
+            if (details.primaryVelocity! > 0) {
+              setState(() => _currentMode = ScheduleViewMode.month);
+            } else if (details.primaryVelocity! < 0) {
+              setState(() => _currentMode = ScheduleViewMode.week);
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(20), // Овальная
+              border: Border.all(color: borderColor, width: 2),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              transitionBuilder: (child, animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(_navigationDirection.toDouble() * 1.0, 0),
+                      end: Offset.zero,
+                    ).animate(CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutCubic,
+                    )),
+                    child: child,
+                  ),
+                );
+              },
+              child: Text(
+                dateText,
+                key: ValueKey(dateText),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Кнопка вперед (с кругом)
+        InkWell(
+          onTap: () => _changeDay(1),
+          borderRadius: BorderRadius.circular(50),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isNextDayToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
+              border: Border.all(
+                color: isNextDayToday ? activeColor : Colors.grey.shade300,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Icon(
+                  Icons.arrow_forward_ios,
+                  key: ValueKey(isNextDayToday),
+                  size: 18,
+                  color: isNextDayToday ? activeColor : Colors.grey.shade600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+
+
+
+  Widget _buildDayOfWeekDisplay() {
+    const activeColor = Color(0xFF409187);
+    final greyColor = Colors.grey.shade600;
+    final dayName = DateFormat('EEEE', 'ru_RU').format(_currentDate);
+    final capitalizedDayName = _capitalize(dayName);
+    
+    // Проверяем, является ли _currentDate сегодняшним днем
+    final isToday = _normalizeDate(_currentDate) == _normalizeDate(DateTime.now());
+    
+    return Center(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: Offset(_navigationDirection.toDouble() * 1.0, 0),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              )),
+              child: child,
+            ),
+          );
+        },
+        child: Text(
+          capitalizedDayName,
+          key: ValueKey(capitalizedDayName),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: isToday ? activeColor : greyColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWeekNavigator(BuildContext context) {
+    const activeColor = Color(0xFF409187);
+    const greyColor = Color(0xFF757575);
+    final currentMonth = DateTime.now().month;
+    final currentYear = DateTime.now().year;
+    final normalizedToday = _normalizeDate(DateTime.now());
+    
+    final startOfWeek = _getStartOfWeek(_currentWeekDate);
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    
+    final today = _normalizeDate(DateTime.now());
+    final isCurrentWeek = today.isAfter(startOfWeek.subtract(const Duration(days: 1))) && 
+                          today.isBefore(endOfWeek.add(const Duration(days: 1)));
+
+    final color = isCurrentWeek ? activeColor : greyColor;
+    final fillColor = isCurrentWeek ? activeColor.withOpacity( 0.2) : Colors.transparent;
+
+    // Определяем цвета для начала и конца недели
+    final startIsCurrentMonth = startOfWeek.month == currentMonth && startOfWeek.year == currentYear;
+    final endIsCurrentMonth = endOfWeek.month == currentMonth && endOfWeek.year == currentYear;
+
+    // Определяем цвета для стрелок
+    final prevWeekStart = startOfWeek.subtract(const Duration(days: 7));
+    final nextWeekStart = startOfWeek.add(const Duration(days: 7));
+    final isPrevWeekCurrent = normalizedToday.isAfter(prevWeekStart.subtract(const Duration(days: 1))) && 
+                              normalizedToday.isBefore(prevWeekStart.add(const Duration(days: 7)));
+    final isNextWeekCurrent = normalizedToday.isAfter(nextWeekStart.subtract(const Duration(days: 1))) && 
+                              normalizedToday.isBefore(nextWeekStart.add(const Duration(days: 7)));
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+      children: [
+        // Кнопка назад (с кругом)
+        InkWell(
+          onTap: () => _changeWeek(-1),
+          borderRadius: BorderRadius.circular(50),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isPrevWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
+              border: Border.all(
+                color: isPrevWeekCurrent ? activeColor : Colors.grey.shade300,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Icon(
+                    Icons.arrow_back_ios,
+                    key: ValueKey(isPrevWeekCurrent),
+                    size: 18,
+                    color: isPrevWeekCurrent ? activeColor : Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        
+        GestureDetector(
+          onTap: _showWeekPickerDialog,
+          onHorizontalDragEnd: (details) {
+            if (details.primaryVelocity! > 0) {
+              setState(() => _currentMode = ScheduleViewMode.day);
+            } else if (details.primaryVelocity! < 0) {
+              setState(() => _currentMode = ScheduleViewMode.month);
+            }
+          },
+          child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), 
+              decoration: BoxDecoration(
+                border: Border.all(color: color, width: 2), 
+                borderRadius: BorderRadius.circular(20),
+                color: fillColor,
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: Offset(_navigationDirection.toDouble() * 1.0, 0),
+                        end: Offset.zero,
+                      ).animate(CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      )),
+                      child: child,
+                    ),
+                  );
+                },
+                child: Text.rich(
+                  key: ValueKey('${_formatDate(startOfWeek)}_${_formatDate(endOfWeek)}'),
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: _formatDate(startOfWeek),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: startIsCurrentMonth ? activeColor : greyColor,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' – ',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      TextSpan(
+                        text: _formatDate(endOfWeek),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: endIsCurrentMonth ? activeColor : greyColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ),
+        ),
+        
+        // Кнопка вперед (с кругом)
+        InkWell(
+          onTap: () => _changeWeek(1),
+          borderRadius: BorderRadius.circular(50),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isNextWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
+              border: Border.all(
+                color: isNextWeekCurrent ? activeColor : Colors.grey.shade300,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Icon(
+                  Icons.arrow_forward_ios,
+                  key: ValueKey(isNextWeekCurrent),
+                  size: 18,
+                  color: isNextWeekCurrent ? activeColor : Colors.grey.shade600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool hasLessons(DateTime day) {
+    final schedule = _getScheduleForDate(day);
+    return schedule.lessons.isNotEmpty;
+  }
+
+
+  String _getWeekRange(DateTime date) {
+    final startOfWeek = _getStartOfWeek(date);
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    return '${_formatDate(startOfWeek)} - ${_formatDate(endOfWeek)}';
+  }
+
+  int _getTotalLessonsForWeek(DateTime weekStart) {
+    int total = 0;
+    for (int i = 0; i < 7; i++) {
+      final day = weekStart.add(Duration(days: i));
+      final schedule = _getScheduleForDate(day);
+      total += schedule.lessons.length;
+    }
+    return total;
+  }
+
+
+
+
+
+
+
+
+
+
+  Duration _getLessonDuration(String time) {
+    final parts = time.split(' - ');
+    if (parts.length != 2) return Duration.zero;
+    
+    final startParts = parts[0].split(':');
+    final endParts = parts[1].split(':');
+    
+    final startMinutes = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+    final endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+    
+    return Duration(minutes: endMinutes - startMinutes);
+  }
+
+
+
+
+
+
+
+
+
+
+
+  Widget _buildStatChip(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity( 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity( 0.3), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMonthCalendar(BuildContext context) {
+    if (fullSchedule.isEmpty) return Container();
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month - 1);
+                  _focusedDay = _monthViewDate;
+                });
+              },
+              borderRadius: BorderRadius.circular(50),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.transparent,
+                  border: Border.all(
+                    color: Colors.grey.shade300,
+                    width: 2,
+                  ),
+                ),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Icon(
+                      Icons.arrow_back_ios,
+                      size: 18,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            GestureDetector(
+              onTap: _showMonthPickerDialog,
+              onHorizontalDragEnd: (details) {
+                if (details.primaryVelocity! > 0) {
+                  setState(() => _currentMode = ScheduleViewMode.week);
+                } else if (details.primaryVelocity! < 0) {
+                  setState(() => _currentMode = ScheduleViewMode.day);
+                }
+              },
+              child: Builder(
+                builder: (context) {
+                  final now = DateTime.now();
+                  final isCurrentMonth = _monthViewDate.year == now.year && _monthViewDate.month == now.month;
+                  final isCurrentYear = _monthViewDate.year == now.year;
+                  
+                  // Определяем стили на основе месяца
+                  Color backgroundColor;
+                  Color borderColor;
+                  Color textColor;
+                  
+                  if (isCurrentMonth) {
+                    // Текущий месяц: яркий зеленый фон + зеленая обводка + зеленый текст
+                    backgroundColor = const Color(0xFF409187).withOpacity( 0.2);
+                    borderColor = const Color(0xFF409187);
+                    textColor = const Color(0xFF409187);
+                  } else if (isCurrentYear) {
+                    // Другой месяц текущего года: без фона + серая обводка + зеленый текст
+                    backgroundColor = Colors.transparent;
+                    borderColor = Colors.grey.shade400;
+                    textColor = const Color(0xFF409187);
+                  } else {
+                    // Месяц другого года: без фона + серая обводка + серый текст
+                    backgroundColor = Colors.transparent;
+                    borderColor = Colors.grey.shade400;
+                    textColor = Colors.grey.shade600;
+                  }
+                  
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: borderColor, width: 2),
+                      color: backgroundColor,
+                    ),
+                    child: Text(
+                      '${DateFormat('LLLL', 'ru').format(_monthViewDate)[0].toUpperCase()}${DateFormat('LLLL', 'ru').format(_monthViewDate).substring(1)}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month + 1);
+                  _focusedDay = _monthViewDate;
+                });
+              },
+              borderRadius: BorderRadius.circular(50),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.transparent,
+                  border: Border.all(
+                    color: Colors.grey.shade300,
+                    width: 2,
+                  ),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.arrow_forward_ios,
+                    size: 18,
+                    color: Colors.grey,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Убираем GestureDetector - пусть TableCalendar сам обрабатывает свайпы
+        Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                splashFactory: NoSplash.splashFactory,
+                splashColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+              ),
+              child: TableCalendar(
+        locale: 'ru_RU',
+        startingDayOfWeek: StartingDayOfWeek.monday,
+        firstDay: DateTime.utc(2023, 1, 1),
+        lastDay: DateTime.utc(2030, 12, 31),
+        focusedDay: _focusedDay,
+        calendarFormat: CalendarFormat.month,
+        headerVisible: false,
+        selectedDayPredicate: (day) {
+          return _selectedDay != null &&
+                 _selectedDay!.year == day.year &&
+                 _selectedDay!.month == day.month &&
+                 _selectedDay!.day == day.day;
+        },
+        onDaySelected: (selectedDay, focusedDay) {
+          if (_selectedDay == null ||
+              _selectedDay!.year != selectedDay.year ||
+              _selectedDay!.month != selectedDay.month ||
+              _selectedDay!.day != selectedDay.day) {
+            setState(() {
+              _previousSelectedDay = _selectedDay; // ПУНКТ 22: Сохраняем предыдущий
+              _selectedDay = selectedDay;
+              _focusedDay = focusedDay;
+              _currentDate = selectedDay;
+            });
+            debugPrint('EVENT: month_day_selected | day: $selectedDay | previous: $_previousSelectedDay');
+          }
+        },
+        onPageChanged: (focusedDay) {
+          setState(() {
+            _focusedDay = focusedDay;
+            _monthViewDate = focusedDay; // Синхронизация заголовка месяца при скролле
+          });
+        },
+        calendarStyle: CalendarStyle(
+          // Today и Selected будут кастомизированы в calendarBuilders
+          todayDecoration: const BoxDecoration(
+            color: Colors.transparent,
+          ),
+          todayTextStyle: const TextStyle(
+            color: Color(0xFF409187),
+            fontWeight: FontWeight.bold,
+          ),
+          selectedDecoration: const BoxDecoration(
+            color: Colors.transparent,
+          ),
+          selectedTextStyle: const TextStyle(
+            color: Color(0xFF409187),
+            fontWeight: FontWeight.bold,
+          ),
+          defaultTextStyle: TextStyle(
+            color: _monthViewDate.month == DateTime.now().month && _monthViewDate.year == DateTime.now().year
+                ? const Color(0xFF409187) // Текущий месяц - зеленый
+                : Colors.black87, // Другие месяцы - черный
+          ),
+          weekendTextStyle: TextStyle(
+            color: _monthViewDate.month == DateTime.now().month && _monthViewDate.year == DateTime.now().year
+                ? const Color(0xFF409187) // Текущий месяц - зеленый
+                : Colors.black87, // Другие месяцы - черный
+          ),
+          outsideTextStyle: TextStyle(
+            color: Colors.grey.shade400, // Дни других месяцев - серый
+          ),
+          markerDecoration: const BoxDecoration(
+            color: Colors.transparent,
+            shape: BoxShape.circle,
+          ),
+        ),
+        calendarBuilders: CalendarBuilders(
+          todayBuilder: (context, day, focusedDay) {
+            final isSelected = _selectedDay != null &&
+                _selectedDay!.year == day.year &&
+                _selectedDay!.month == day.month &&
+                _selectedDay!.day == day.day;
+            
+            // ПУНКТ 22: Если сегодня выбран - зеленая заливка, иначе серая рамка
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isSelected 
+                  ? const Color(0xFF409187) 
+                  : const Color(0xFF409187).withOpacity( 0.2),
+                border: Border.all(
+                  color: isSelected 
+                    ? const Color(0xFF409187) 
+                    : Colors.grey.shade400,
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : const Color(0xFF409187),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          },
+          selectedBuilder: (context, day, focusedDay) {
+            final isToday = day.year == DateTime.now().year &&
+                day.month == DateTime.now().month &&
+                day.day == DateTime.now().day;
+            
+            if (isToday) return null; // Используем todayBuilder
+            
+            // ПУНКТ 22: Зелёная заливка для выбранного дня
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF409187), // Зелёная заливка
+                border: Border.all(
+                  color: const Color(0xFF409187),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: const TextStyle(
+                    color: Colors.white, // Белый текст
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          },
+          markerBuilder: (context, day, events) {
+            return null;
+          },
+        ),
+        headerStyle: const HeaderStyle(
+          formatButtonVisible: false, 
+          titleCentered: true,
+        ),
+          ),
+        ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDayScheduleList(DateTime date) {
+    final DailySchedule daily = _getScheduleForDate(date);
+    final isToday = _normalizeDate(date) == _normalizeDate(DateTime.now());
+    
+    if (daily.lessons.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 30.0),
+        child: Center(
+          child: Text(
+            'На этот день (${daily.day}) занятий нет! Отдыхайте. 😊',
+            style: const TextStyle(fontSize: 20, color: Colors.black54),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    
+    // Проверяем наличие контрольных и показываем SnackBar
+    final dateKey = date.toString().split(' ')[0];
+    final exams = daily.lessons.where((l) => l.examNote != null).toList();
+    if (exams.isNotEmpty && !_viewedExams.contains(dateKey)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _currentMode == ScheduleViewMode.day) {
+          _viewedExams.add(dateKey);
+          final examLesson = exams.first;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(examLesson.examNote ?? 'Контрольная'),
+              duration: const Duration(seconds: 5),
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+              action: SnackBarAction(
+                label: 'Показать',
+                textColor: Colors.white,
+                onPressed: () {
+                  // Скроллим к уроку с контрольной
+                  final lessonIndex = daily.lessons.indexOf(examLesson);
+                  if (lessonIndex >= 0) {
+                    _scrollController.animateTo(
+                      lessonIndex * 200.0, // Примерная высота одного урока
+                      duration: const Duration(milliseconds: 600),
+                      curve: Curves.easeOutCubic,
+                    );
+                  }
+                },
+              ),
+            ),
+          );
+        }
+      });
+    }
+    
+    // УБРАНО: Окно текущего урока больше не отображается
+    
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: const Color(0xFF409187).withOpacity( 0.3), width: 2),
+      ),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.65,
+        padding: const EdgeInsets.all(12),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            // ПУНКТ 24: Nested scroll propagation
+            if (notification is ScrollUpdateNotification) {
+              final position = _scrollController.position;
+              
+              // Достигли верха и тянем вверх
+              if (position.pixels <= position.minScrollExtent && 
+                  notification.scrollDelta! < 0) {
+                debugPrint('SCROLL: propagate_up | delta: ${notification.scrollDelta}');
+                return false; // Передать родителю
+              }
+              
+              // Достигли низа и тянем вниз
+              if (position.pixels >= position.maxScrollExtent && 
+                  notification.scrollDelta! > 0) {
+                debugPrint('SCROLL: propagate_down | delta: ${notification.scrollDelta}');
+                return false; // Передать родителю
+              }
+            }
+            
+            if (notification is OverscrollNotification) {
+              debugPrint('SCROLL: overscroll | value: ${notification.overscroll}');
+              return false; // Передать родителю для bounce эффекта
+            }
+            
+            return true; // Обрабатываем скролл здесь
+          },
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const ClampingScrollPhysics(), // ПУНКТ 24: Важно для nested scroll
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 10),
+                ...daily.lessons.asMap().entries.map((entry) {
+              final index = entry.key;
+              final lesson = entry.value;
+              final examKey = '${date.toString()}_${lesson.time}';
+              final shouldPulse = lesson.examNote != null && !_viewedExams.contains(examKey);
+              
+              // ПУНКТ 21: Создаём GlobalKey для урока с контрольной
+              final lessonKey = lesson.examNote != null 
+                ? _examLessonKeys.putIfAbsent(examKey, () => GlobalKey())
+                : null;
+              
+              // Показываем SnackBar при первом открытии дня с контрольной
+              if (lesson.examNote != null && !_seenExamDates.contains(DateFormat('yyyy-MM-dd').format(date))) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _maybeShowExamSnackbar(context, date, examKey);
+                });
+              }
+              
+              // ПУНКТ 27: RepaintBoundary для оптимизации
+              return RepaintBoundary(
+                key: lessonKey, // ПУНКТ 21: GlobalKey для скролла
+                child: LessonTile(
+                  key: ValueKey('lesson_day_${date}_$index'), // ПУНКТ 27: ValueKey
+                  time: lesson.time,
+                  title: lesson.title, 
+                  teacher: lesson.teacher,
+                  classroom: lesson.classroom,
+                  baseColor: lesson.baseColor,
+                  type: lesson.type, 
+                  format: lesson.format,
+                  isToday: isToday,
+                  onPowerAppsPressed: _showPowerAppsDialog,
+                  onTeacherTap: () => _showTeacherInfo(lesson.teacher),
+                  examNote: lesson.examNote,
+                  shouldPulse: shouldPulse,
+                  lessonNumber: index + 1,
+                  deepLink: lesson.deepLink,
+                ),
+              );
+            }).toList(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWeekDayTimer(DailySchedule dailySchedule, bool isToday, Color activeColor, int lessonCount) {
+    if (!isToday || dailySchedule.lessons.isEmpty) {
+      // Обычный круг с количеством уроков
+      return Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: isToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: isToday ? activeColor : Colors.grey.shade400,
+            width: 2,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            '$lessonCount',
+            style: TextStyle(
+              color: isToday ? activeColor : Colors.grey.shade600,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ДИНАМИЧЕСКИЙ ТАЙМЕР для сегодняшнего дня (обновляется каждую секунду)
+    return _WeekDayTimerWidget(
+      dailySchedule: dailySchedule,
+      activeColor: activeColor,
+      lessonCount: lessonCount,
+    );
+  }
+
+  Widget _buildWeekScheduleList() {
+    final today = _normalizeDate(DateTime.now());
+    const activeColor = Color(0xFF409187);
+    
+    // Фильтруем расписание только для текущей недели
+    final startOfWeek = _getStartOfWeek(_currentWeekDate);
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    final weekSchedule = fullSchedule.where((schedule) {
+      final date = _normalizeDate(schedule.date);
+      return date.isAfter(startOfWeek.subtract(const Duration(days: 1))) &&
+             date.isBefore(endOfWeek.add(const Duration(days: 1)));
+    }).toList();
+
+    // ПУНКТ 12: PageStorageKey для сохранения состояния при переключении режимов
+    return Column(
+      key: PageStorageKey('week_list_${_currentWeekDate.toIso8601String()}'),
+      children: weekSchedule.map((dailySchedule) {
+        final normalizedDate = _normalizeDate(dailySchedule.date);
+        final isToday = normalizedDate == today;
+        final lessonCount = dailySchedule.lessons.length;
+        final tileKeyStr = '${dailySchedule.date}';
+        final globalKey = _tileKeys.putIfAbsent(tileKeyStr, () => GlobalKey());
+
+        // ПУНКТ 12: KeyedSubtree для стабильности при rebuild
+        return KeyedSubtree(
+          key: ValueKey(dailySchedule.date.toIso8601String()),
+          child: WeekCollapsible(
+            key: ValueKey('collapsible_${dailySchedule.date}'),
+          collapsibleKey: globalKey,
+          isCurrentDay: isToday, // ПУНКТ 1: Передаём флаг текущего дня
+          initiallyExpanded: _expandedTiles.contains(tileKeyStr),
+          onExpansionChanged: (expanded) async {
+            if (expanded) {
+              setState(() => _expandedTiles.add(tileKeyStr));
+              // ПУНКТ 8: Вибрация ТОЛЬКО при раскрытии дня с контрольной + debounce
+              final hasExam = dailySchedule.lessons.any((l) => l.examNote != null);
+              if (hasExam && !_vibrationFiredForDate.contains(tileKeyStr)) {
+                final hasVibrator = await Vibration.hasVibrator() ?? false;
+                if (hasVibrator) {
+                  Vibration.vibrate(duration: 160);
+                  _vibrationFiredForDate.add(tileKeyStr);
+                  debugPrint('VIBRATION: fired | date: $tileKeyStr | hasExam: true');
+                }
+              }
+            } else {
+              setState(() => _expandedTiles.remove(tileKeyStr));
+              // Скролл к заголовку после закрытия
+              await Future.delayed(const Duration(milliseconds: 800));
+              if (globalKey.currentContext != null && mounted) {
+                await Scrollable.ensureVisible(
+                  globalKey.currentContext!,
+                  duration: const Duration(milliseconds: 600),
+                  curve: Curves.easeOutCubic,
+                  alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+                );
+              }
+            }
+          },
+          header: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isToday ? activeColor.withOpacity( 0.15) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    dailySchedule.day,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: isToday ? activeColor : Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+                _buildWeekDayTimer(dailySchedule, isToday, activeColor, lessonCount),
+                const SizedBox(width: 8),
+                Text(
+                  _formatDate(dailySchedule.date),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isToday 
+                      ? activeColor 
+                      : (normalizedDate.month == DateTime.now().month && normalizedDate.year == DateTime.now().year
+                          ? activeColor 
+                          : Colors.grey.shade600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  _expandedTiles.contains(tileKeyStr) ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  color: isToday ? activeColor : Colors.grey.shade600,
+                ),
+              ],
+            ),
+          ),
+          children: dailySchedule.lessons.isEmpty
+              ? [
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Занятий нет', style: TextStyle(color: Colors.black54)),
+                  ),
+                ]
+              : dailySchedule.lessons.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final lesson = entry.value;
+                  final examKey = '${dailySchedule.date.toString()}_${lesson.time}';
+                  final shouldPulse = lesson.examNote != null && !_viewedExams.contains(examKey);
+                  
+                  // ПУНКТ 2: Используем staggered анимацию
+                  return TweenAnimationBuilder<double>(
+                    key: ValueKey('lesson_${dailySchedule.date}_$index'),
+                    duration: Duration(milliseconds: 400 + (index * 100)),
+                    tween: Tween(begin: 0.0, end: 1.0),
+                    curve: Curves.easeOut,
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 20 * (1 - value)),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      child: RepaintBoundary(
+                        child: LessonTile(
+                          time: lesson.time,
+                          title: lesson.title,
+                          teacher: lesson.teacher,
+                          classroom: lesson.classroom,
+                          baseColor: lesson.baseColor,
+                          type: lesson.type,
+                          format: lesson.format,
+                          isToday: isToday,
+                          onPowerAppsPressed: _showPowerAppsDialog,
+                          onTeacherTap: () => _showTeacherInfo(lesson.teacher),
+                          examNote: lesson.examNote,
+                          shouldPulse: shouldPulse,
+                          lessonNumber: index + 1,
+                          deepLink: lesson.deepLink,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+          ), // ПУНКТ 12: Закрываем WeekCollapsible
+        ), // ПУНКТ 12: Закрываем KeyedSubtree
+        );
+      }).toList(),
+    ); // ПУНКТ 12: Закрываем Column с PageStorageKey
+  }
+
+
+
+
+}
+
+class LessonTile extends StatefulWidget {
+  final String time; 
+  final String title; 
+  final String teacher;
+  final String classroom;
+  final Color baseColor;
+  final LessonType type; 
+  final LessonFormat format;
+  final bool isToday;
+  final VoidCallback? onPowerAppsPressed;
+  final VoidCallback? onTeacherTap;
+  final String? examNote;
+  final bool shouldPulse;
+  final int lessonNumber; // Порядковый номер урока в дне
+  final String deepLink;
+
+  const LessonTile({
+    super.key,
+    required this.time,
+    required this.title,
+    required this.teacher,
+    required this.classroom,
+    required this.baseColor,
+    required this.type,
+    required this.format,
+    this.isToday = false,
+    this.onPowerAppsPressed,
+    this.onTeacherTap,
+    this.examNote,
+    this.shouldPulse = false,
+    required this.lessonNumber,
+    this.deepLink = '',
+  });
+
+  @override
+  State<LessonTile> createState() => _LessonTileState();
+}
+
+class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+  late AnimationController _borderController;
+  bool _isLoading = false;
+  bool _isPressedTitle = false;
+  Timer? _longPressTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
+    // 3D анимация: scale для эффекта приближения к экрану
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
+    );
+    
+    _borderController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
+    if (widget.shouldPulse && widget.examNote != null) {
+      _startPulseWithVibration();
+    }
+  }
+
+  Future<void> _startPulseWithVibration() async {
+    debugPrint('EVENT: exam_pulse_start | timestamp: ${DateTime.now()}');
+    final hasVibrator = await Vibration.hasVibrator() ?? false;
+    
+    // 2 серии по 3 импульса с bounce эффектом
+    for (int series = 0; series < 2; series++) {
+      // 3 импульса за 1.0 секунду
+      for (int i = 0; i < 3; i++) {
+        if (hasVibrator) Vibration.vibrate(duration: 40);
+        await _pulseController.forward(from: 0);
+        await _pulseController.reverse();
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
+      
+      // Пауза 1.5 секунды между сериями
+      if (series == 0) {
+        await Future.delayed(const Duration(milliseconds: 1500));
+      }
+    }
+    
+    debugPrint('EVENT: exam_pulse_end | timestamp: ${DateTime.now()}');
+  }
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    _pulseController.dispose();
+    _borderController.dispose();
+    super.dispose();
+  }
+
+  Map<String, dynamic> _getLessonStyle() {
+    switch (widget.type) {
+      case LessonType.online:
+        return {'icon': Icons.laptop_windows, 'color': const Color.fromARGB(255, 27, 79, 114)};
+      case LessonType.exam:
+        return {'icon': Icons.assignment, 'color': const Color.fromARGB(255, 52, 152, 219)};
+      case LessonType.changed:
+        return {'icon': Icons.warning_amber, 'color': const Color.fromARGB(255, 230, 126, 34)};
+      case LessonType.regular:
+      default:
+        return {'icon': Icons.menu_book, 'color': const Color(0xFF409187)};
+    }
+  }
+
+  String _getFormatText() {
+    switch (widget.format) {
+      case LessonFormat.lecture: return 'LECT';
+      case LessonFormat.practice: return 'PRAC';
+      case LessonFormat.lab: return 'LAB';
+      default: return 'LECT';
+    }
+  }
+
+  Widget _buildLegendItem(Color color, String label) {
+    return Row(
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Text(
+          '—',
+          style: TextStyle(fontSize: 20, color: Colors.grey),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 16),
+        ),
+      ],
+    );
+  }
+
+  void _showLessonTypeBottomSheet(BuildContext context, Color typeColor) {
+    debugPrint('EVENT: lesson_legend_opened | timestamp: ${DateTime.now()}');
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Заголовок
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Легенда типов уроков',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                // ПУНКТ 20: Крестик удалён, закрытие по свайпу вниз
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            // ПОЛНАЯ ЛЕГЕНДА ВСЕХ ТИПОВ
+            _buildLegendRow(
+              context,
+              'Обычный урок',
+              Icons.menu_book,
+              const Color(0xFF409187),
+              'Стандартное занятие в аудитории',
+            ),
+            const SizedBox(height: 16),
+            _buildLegendRow(
+              context,
+              'Дистанционно',
+              Icons.laptop_windows,
+              const Color.fromARGB(255, 27, 79, 114),
+              'Онлайн-занятие через Zoom/Teams',
+            ),
+            const SizedBox(height: 16),
+            _buildLegendRow(
+              context,
+              'Экзамен',
+              Icons.assignment,
+              const Color.fromARGB(255, 52, 152, 219),
+              'Контрольная работа или экзамен',
+            ),
+            const SizedBox(height: 16),
+            _buildLegendRow(
+              context,
+              'Изменено',
+              Icons.warning_amber,
+              const Color.fromARGB(255, 230, 126, 34),
+              'Изменение в расписании',
+            ),
+            const SizedBox(height: 24),
+            
+            // Кнопка "Закрыть"
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF409187),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Закрыть',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegendRow(BuildContext context, String title, IconData icon, Color color, String description) {
+    return Row(
+      children: [
+        Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 26),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                description,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // НОВОЕ МОДАЛЬНОЕ ОКНО ПРИ КЛИКЕ НА ВРЕМЯ
+  void _showLessonDetailsDialog(BuildContext context, Color typeColor) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return LessonDetailsDialog(
+          lessonNumber: widget.lessonNumber,
+          title: widget.title,
+          timeRange: widget.time,
+          color: typeColor,
+        );
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: anim1,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.8, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _getLessonStyle();
+    final typeColor = style['color'] as Color;
+    final formatText = _getFormatText();
+
+    return InkWell(
+      onLongPress: () => _showLessonTypeBottomSheet(context, typeColor),
+      borderRadius: BorderRadius.circular(12),
+      child: Card(
+        elevation: 5, 
+        color: widget.baseColor, 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.only(bottom: 16), 
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+          // 1. ЦВЕТНОЙ ВЕРХНИЙ БАР
+          GestureDetector(
+            onLongPress: () {
+              showModalBottomSheet(
+                context: context,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                builder: (context) => Container(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Легенда цветов',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 20),
+                      _buildLegendItem(const Color(0xFF409187), 'Обычный урок'),
+                      const SizedBox(height: 12),
+                      _buildLegendItem(const Color.fromARGB(255, 27, 79, 114), 'Дистанционно'),
+                      const SizedBox(height: 12),
+                      _buildLegendItem(const Color.fromARGB(255, 52, 152, 219), 'Экзамен'),
+                      const SizedBox(height: 12),
+                      _buildLegendItem(const Color.fromARGB(255, 230, 126, 34), 'Изменено'),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              );
+            },
+            child: Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: typeColor, 
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  // ЛЕВАЯ ЗОНА: Тип урока (строго в левом углу)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: Row(
+                      children: [
+                        InkWell(
+                          onTap: () => _showLessonTypeBottomSheet(context, typeColor),
+                          child: Container(
+                            padding: const EdgeInsets.only(left: 12, right: 8, top: 6, bottom: 6),
+                            child: Text(
+                              formatText,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (widget.type == LessonType.online)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: InkWell(
+                              onTap: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Открывается: ${widget.classroom}'),
+                                    duration: const Duration(seconds: 2),
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: const Color(0xFF409187).withOpacity( 0.85),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                width: 24,
+                                height: 24,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity( 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.white, width: 1),
+                                ),
+                                child: const Icon(Icons.videocam, color: Colors.white, size: 14),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  
+                  // ЦЕНТРАЛЬНАЯ ЗОНА: Время (статично по центру)
+                  Center(
+                    child: InkWell(
+                      onTap: () => _showLessonDetailsDialog(context, typeColor),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Text(
+                          widget.time,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                  // ПРАВАЯ ЗОНА: Иконка урока + PowerApps (статично справа)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Row(
+                        children: [
+                          Icon(style['icon'] as IconData, color: Colors.white, size: 20),
+                        if (widget.isToday) ...[
+                          const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () async {
+                            try {
+                              final packageUrl = Uri.parse('com.microsoft.msapps://open');
+                              if (await canLaunchUrl(packageUrl)) {
+                                await launchUrl(packageUrl, mode: LaunchMode.externalApplication);
+                                return;
+                              }
+                              if (widget.deepLink.isNotEmpty) {
+                                final url = Uri.parse(widget.deepLink);
+                                if (await canLaunchUrl(url)) {
+                                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                                  return;
+                                }
+                              }
+                              final webUrl = Uri.parse('https://make.powerapps.com/');
+                              if (await canLaunchUrl(webUrl)) {
+                                await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Приложение не найдено. Открыта веб-версия'), duration: Duration(seconds: 3)),
+                                  );
+                                }
+                                return;
+                              }
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text('PowerApps не установлен. Установите из Google Play'),
+                                    duration: const Duration(seconds: 4),
+                                    action: SnackBarAction(label: 'OK', onPressed: () {}),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              debugPrint('Error launching PowerApps: $e');
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Ошибка: $e'), duration: const Duration(seconds: 3)),
+                                );
+                              }
+                            }
+                          },
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity( 0.2),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.white, width: 1),
+                            ),
+                            child: Center(
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(4),
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [Color(0xFF742774), Color(0xFFD946A0)],
+                                  ),
+                                ),
+                                child: const Icon(Icons.apps, size: 12, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 2. ИНФОРМАЦИОННЫЙ БЛОК
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14.0),
+            decoration: BoxDecoration(
+              color: Colors.white, 
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(12),
+                bottomRight: Radius.circular(12),
+              ),
+              border: Border.all(color: typeColor, width: 2), 
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // НАЗВАНИЕ ПРЕДМЕТА В РАМКЕ С ИКОНКОЙ
+                GestureDetector(
+                  onTap: () {
+                    // Простое нажатие - запускаем анимацию
+                    setState(() {
+                      _isLoading = !_isLoading;
+                      if (_isLoading) {
+                        _borderController.repeat();
+                      } else {
+                        _borderController.stop();
+                        _borderController.reset();
+                      }
+                      debugPrint('EVENT: lesson_title_tap | lesson: ${widget.title} | timestamp: ${DateTime.now()}');
+                    });
+                  },
+                  onTapDown: (_) {
+                    setState(() => _isPressedTitle = true);
+                  },
+                  onTapUp: (_) {
+                    setState(() => _isPressedTitle = false);
+                  },
+                  onTapCancel: () {
+                    setState(() => _isPressedTitle = false);
+                  },
+                  child: AnimatedScale(
+                    scale: _isPressedTitle ? 0.95 : 1.0,
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOut,
+                    child: CustomPaint(
+                      painter: _isLoading ? _BorderLoadingPainter(
+                        progress: _borderController.value,
+                        color: typeColor,
+                      ) : null,
+                      child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: typeColor,
+                          width: 2,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.title,
+                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    key: ValueKey('loading'),
+                                    width: 20,
+                                    height: 20,
+                                  )
+                                : const Text(
+                                    '🎓',
+                                    key: ValueKey('emoji'),
+                                    style: TextStyle(fontSize: 20),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ),
+                  ),
+                ),
+                
+                // РАЗДЕЛИТЕЛЬ
+                const Divider(height: 20, thickness: 1, color: Colors.black12),
+                
+                // ПРЕПОДАВАТЕЛЬ
+                InkWell(
+                  onTap: widget.onTeacherTap,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_outline, size: 18, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.teacher, 
+                            style: const TextStyle(color: Colors.black87)
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                
+                // АУДИТОРИЯ/АДРЕС (КЛИКАБЕЛЬНАЯ ДЛЯ ОНЛАЙН И GOOGLE MAPS)
+                Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 18, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: widget.type == LessonType.online
+                          ? InkWell(
+                              onTap: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Открывается: ${widget.classroom}'),
+                                    duration: const Duration(seconds: 3),
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: const Color(0xFF409187).withOpacity( 0.85),
+                                    dismissDirection: DismissDirection.down,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                widget.classroom,
+                                style: const TextStyle(
+                                  color: Colors.blue,
+                                  decoration: TextDecoration.underline,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                InkWell(
+                                  onTap: () async {
+                                    final address = 'Ломоносова 27, Рига, Латвия';
+                                    final encodedAddress = Uri.encodeComponent(address);
+                                    final url = Uri.parse('geo:0,0?q=$encodedAddress');
+                                    if (await canLaunchUrl(url)) {
+                                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                                    } else {
+                                      final webUrl = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedAddress');
+                                      await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+                                    }
+                                  },
+                                  child: const Text('Ломоносова 27', style: TextStyle(color: Colors.black87, fontSize: 13)),
+                                ),
+                                Container(margin: const EdgeInsets.symmetric(horizontal: 8), width: 1, height: 14, color: Colors.grey.shade400),
+                                Text(widget.classroom, style: const TextStyle(color: Color(0xFF424242), fontWeight: FontWeight.bold, fontSize: 13)),
+                              ],
+                            ),
+                    ),
+                  ],
+                ),
+                
+                // БЛОК КОНТРОЛЬНОЙ РАБОТЫ (если есть)
+                if (widget.examNote != null) ...[
+                  const SizedBox(height: 12),
+                  const Divider(height: 1, thickness: 1, color: Colors.black12),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    clipBehavior: Clip.hardEdge,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF409187).withOpacity( 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF409187), width: 2),
+                    ),
+                    child: AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        // 3D эффект: приближение к пользователю (к экрану)
+                        return Transform(
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, 0.001) // perspective
+                            ..scale(_pulseAnimation.value, _pulseAnimation.value, 1.0),
+                          alignment: Alignment.center,
+                          child: child,
+                        );
+                      },
+                      child: Row(
+                        children: [
+                          const Icon(Icons.description_outlined, color: Color(0xFF409187), size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              widget.examNote!,
+                              style: const TextStyle(
+                                color: Color(0xFF2C6B63),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+}
+
+// Динамический таймер урока с порядковым номером
+class LessonTimer extends StatefulWidget {
+  final String timeRange; // "08:30 - 10:00"
+  final int lessonNumber; // Порядковый номер урока в дне
+  final Color color;
+
+  const LessonTimer({
+    super.key,
+    required this.timeRange,
+    required this.lessonNumber,
+    required this.color,
+  });
+
+  @override
+  State<LessonTimer> createState() => _LessonTimerState();
+}
+
+class _LessonTimerState extends State<LessonTimer> {
+  Timer? _timer;
+  double _progress = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateProgress();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _updateProgress();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _updateProgress() {
+    final now = DateTime.now();
+    final times = widget.timeRange.split(' - ');
+    if (times.length != 2) return;
+
+    try {
+      final startParts = times[0].split(':');
+      final endParts = times[1].split(':');
+      
+      final startTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(startParts[0]),
+        int.parse(startParts[1]),
+      );
+      
+      final endTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(endParts[0]),
+        int.parse(endParts[1]),
+      );
+
+      if (now.isBefore(startTime)) {
+        setState(() => _progress = 0.0);
+      } else if (now.isAfter(endTime)) {
+        setState(() => _progress = 1.0);
+      } else {
+        final total = endTime.difference(startTime).inSeconds;
+        final elapsed = now.difference(startTime).inSeconds;
+        setState(() => _progress = elapsed / total);
+      }
+    } catch (e) {
+      debugPrint('Error parsing time: $e');
+    }
+  }
+
+  void _showDetailDialog() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Детали урока',
+      barrierColor: Colors.black.withOpacity( 0.7),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return Container();
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return ScaleTransition(
+          scale: Tween<double>(begin: 0.8, end: 1.0).animate(
+            CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+          ),
+          child: FadeTransition(
+            opacity: anim1,
+            child: LessonDetailDialog(
+              lessonNumber: widget.lessonNumber,
+              timeRange: widget.timeRange,
+              color: widget.color,
+              progress: _progress,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _showDetailDialog,
+      child: SizedBox(
+        width: 32,
+        height: 32,
+        child: CustomPaint(
+          painter: _CircleProgressPainter(
+            progress: _progress,
+            progressColor: widget.color,
+            bgColor: widget.color.withOpacity( 0.2),
+            strokeWidth: 2,
+          ),
+          child: Center(
+            child: Text(
+              '${widget.lessonNumber}',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: widget.color,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Модальное окно с деталями урока
+class LessonDetailDialog extends StatefulWidget {
+  final int lessonNumber;
+  final String timeRange;
+  final Color color;
+  final double progress;
+
+  const LessonDetailDialog({
+    super.key,
+    required this.lessonNumber,
+    required this.timeRange,
+    required this.color,
+    required this.progress,
+  });
+
+  @override
+  State<LessonDetailDialog> createState() => _LessonDetailDialogState();
+}
+
+class _LessonDetailDialogState extends State<LessonDetailDialog> {
+  Timer? _timer;
+  bool _showElapsed = true; // true = прошедшее, false = оставшееся
+  Duration _currentDuration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateDuration();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _updateDuration();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _updateDuration() {
+    final now = DateTime.now();
+    final times = widget.timeRange.split(' - ');
+    if (times.length != 2) return;
+
+    try {
+      final startParts = times[0].split(':');
+      final endParts = times[1].split(':');
+      
+      final startTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(startParts[0]),
+        int.parse(startParts[1]),
+      );
+      
+      final endTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(endParts[0]),
+        int.parse(endParts[1]),
+      );
+
+      if (_showElapsed) {
+        if (now.isBefore(startTime)) {
+          setState(() => _currentDuration = Duration.zero);
+        } else if (now.isAfter(endTime)) {
+          setState(() => _currentDuration = endTime.difference(startTime));
+        } else {
+          setState(() => _currentDuration = now.difference(startTime));
+        }
+      } else {
+        if (now.isBefore(startTime)) {
+          setState(() => _currentDuration = endTime.difference(startTime));
+        } else if (now.isAfter(endTime)) {
+          setState(() => _currentDuration = Duration.zero);
+        } else {
+          setState(() => _currentDuration = endTime.difference(now));
+        }
+      }
+    } catch (e) {
+      debugPrint('Error calculating duration: $e');
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final times = widget.timeRange.split(' - ');
+    final startTime = times.isNotEmpty ? times[0] : '';
+    final endTime = times.length > 1 ? times[1] : '';
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Заголовок: номер урока
+            Text(
+              '${widget.lessonNumber}-й Урок',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: widget.color,
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // Время начала и конца
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  startTime,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                Text(
+                  endTime,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Горизонтальный прогресс бар
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(
+                value: widget.progress,
+                minHeight: 12,
+                backgroundColor: widget.color.withOpacity( 0.2),
+                valueColor: AlwaysStoppedAnimation<Color>(widget.color),
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Время (переключаемое)
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showElapsed = !_showElapsed;
+                  _updateDuration();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: widget.color.withOpacity( 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: widget.color, width: 2),
+                ),
+                child: Text(
+                  _showElapsed
+                      ? _formatDuration(_currentDuration)
+                      : '-${_formatDuration(_currentDuration)}',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: widget.color,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _showElapsed ? 'Прошло времени' : 'Осталось времени',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// МОДАЛЬНОЕ ОКНО С ДЕТАЛЯМИ УРОКА (при клике на время)
+class LessonDetailsDialog extends StatefulWidget {
+  final int lessonNumber;
+  final String title;
+  final String timeRange;
+  final Color color;
+
+  const LessonDetailsDialog({
+    super.key,
+    required this.lessonNumber,
+    required this.title,
+    required this.timeRange,
+    required this.color,
+  });
+
+  @override
+  State<LessonDetailsDialog> createState() => _LessonDetailsDialogState();
+}
+
+class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
+  bool _showElapsed = true; // true = прошедшее, false = оставшееся
+  late Timer _timer;
+  Duration _currentDuration = Duration.zero;
+  double _progress = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateDuration();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          _updateDuration();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  void _updateDuration() {
+    final times = widget.timeRange.split(' - ');
+    if (times.length != 2) return;
+
+    final now = DateTime.now();
+    final startTime = _parseTime(times[0]);
+    final endTime = _parseTime(times[1]);
+
+    if (startTime == null || endTime == null) return;
+
+    final start = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
+    final end = DateTime(now.year, now.month, now.day, endTime.hour, endTime.minute);
+    final total = end.difference(start);
+
+    if (now.isBefore(start)) {
+      // Урок еще не начался
+      _progress = 0.0;
+      _currentDuration = Duration.zero;
+    } else if (now.isAfter(end)) {
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Урок закончился
+      _progress = 1.0;
+      if (_showElapsed) {
+        _currentDuration = total; // Показываем полную длительность
+      } else {
+        _currentDuration = Duration.zero; // Оставшееся = 00:00:00
+      }
+    } else {
+      // Урок идет
+      final elapsed = now.difference(start);
+      _progress = elapsed.inSeconds / total.inSeconds;
+      _currentDuration = _showElapsed ? elapsed : end.difference(now);
+    }
+  }
+
+  DateTime? _parseTime(String time) {
+    try {
+      final parts = time.trim().split(':');
+      if (parts.length == 2) {
+        return DateTime(0, 1, 1, int.parse(parts[0]), int.parse(parts[1]));
+      }
+    } catch (e) {
+      debugPrint('Error parsing time: $e');
+    }
+    return null;
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final times = widget.timeRange.split(' - ');
+    final startTime = times.isNotEmpty ? times[0] : '';
+    final endTime = times.length > 1 ? times[1] : '';
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Ряд 1: Порядковый номер урока
+            Text(
+              '${widget.lessonNumber}-й Урок',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: widget.color,
+              ),
+            ),
+            const SizedBox(height: 12),
+            
+            // Ряд 2: Название урока
+            Text(
+              widget.title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            
+            // Время начала и конца
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  startTime,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black54,
+                  ),
+                ),
+                Text(
+                  endTime,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Ряд 3: Горизонтальный прогресс бар (динамический, меняется при переключении)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+                child: LinearProgressIndicator(
+                  key: ValueKey(_showElapsed),
+                  value: _showElapsed ? _progress : (1.0 - _progress),
+                  minHeight: 12,
+                  backgroundColor: widget.color.withOpacity( 0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    _showElapsed ? widget.color : widget.color.withOpacity( 0.6)
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // Ряд 4: Время (переключаемое) - ЧАС:МИНУТА:СЕКУНДА С АНИМАЦИЕЙ
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showElapsed = !_showElapsed;
+                  _updateDuration();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                decoration: BoxDecoration(
+                  color: widget.color.withOpacity( 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: widget.color, width: 2),
+                ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+                  child: Text(
+                    _showElapsed
+                        ? _formatDuration(_currentDuration)
+                        : '-${_formatDuration(_currentDuration)}',
+                    key: ValueKey(_showElapsed),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: widget.color,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _showElapsed ? 'Прошло времени' : 'Осталось времени',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// ПУНКТ 16: FixedLessonTimer - Фиксированный размер таймера
+// ============================================================================
+class FixedLessonTimer extends StatefulWidget {
+  final DateTime start;
+  final DateTime end;
+  const FixedLessonTimer({required this.start, required this.end, super.key});
+
+  @override
+  State<FixedLessonTimer> createState() => _FixedLessonTimerState();
+}
+
+class _FixedLessonTimerState extends State<FixedLessonTimer>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  bool _showRemaining = false;
+
+  double get _total => widget.end.difference(widget.start).inSeconds.toDouble();
+  double get _elapsed =>
+      DateTime.now().difference(widget.start).inSeconds.toDouble().clamp(0, _total);
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('TIMER: init | start: ${widget.start} | end: ${widget.end}');
+    _ctrl = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    debugPrint('TIMER: dispose');
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _showRemaining = !_showRemaining);
+    debugPrint('TIMER: toggle | showRemaining: $_showRemaining');
+  }
+
+  String _formatTime(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _elapsed / _total;
+    return GestureDetector(
+      onTap: _toggle,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, __) {
+          final timeValue = _showRemaining
+              ? _formatTime((_total - _elapsed).toInt())
+              : _formatTime(_elapsed.toInt());
+          
+          return CustomPaint(
+            painter: _TimerPainter(progress: progress, showRemaining: _showRemaining),
+            child: Container(
+              alignment: Alignment.center,
+              width: 160, // ФИКСИРОВАННЫЙ размер
+              height: 36,
+              child: Text(
+                _showRemaining ? '-$timeValue' : timeValue,
+                style: const TextStyle(
+                  fontFeatures: [FontFeature.tabularFigures()],
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TimerPainter extends CustomPainter {
+  final double progress;
+  final bool showRemaining;
+  _TimerPainter({required this.progress, required this.showRemaining});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bg = Paint()..color = const Color(0xFF409187).withOpacity( 0.18);
+    final fg = Paint()..color = showRemaining ? Colors.lightGreen : const Color(0xFF409187);
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(8));
+    canvas.drawRRect(rrect, bg);
+    
+    final filledWidth = showRemaining
+        ? size.width * (1 - progress)
+        : size.width * progress;
+    final rect = Rect.fromLTWH(
+      showRemaining ? size.width - filledWidth : 0,
+      0,
+      filledWidth,
+      size.height,
+    );
+    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(8)), fg);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TimerPainter old) =>
+      old.progress != progress || old.showRemaining != showRemaining;
+}
+
+class BannerWidget extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String text;
+
+  const BannerWidget({
+    super.key,
+    required this.color,
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox.shrink(); 
+  }
+}
+
+class _CircleProgressPainter extends CustomPainter {
+  final double progress;
+  final Color progressColor;
+  final Color bgColor;
+  final double strokeWidth;
+
+  _CircleProgressPainter({
+    required this.progress,
+    required this.progressColor,
+    required this.bgColor,
+    this.strokeWidth = 3.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - strokeWidth) / 2;
+    
+    final backgroundPaint = Paint()
+      ..color = bgColor
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    
+    canvas.drawCircle(center, radius, backgroundPaint);
+    
+    if (progress > 0) {
+      final progressPaint = Paint()
+        ..color = progressColor
+        ..strokeWidth = strokeWidth
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2,
+        2 * math.pi * progress,
+        false,
+        progressPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CircleProgressPainter oldDelegate) {
+    return true;
+  }
+}
+
+// Динамический таймер для вкладки Неделя
+class _WeekDayTimerWidget extends StatefulWidget {
+  final DailySchedule dailySchedule;
+  final Color activeColor;
+  final int lessonCount;
+
+  const _WeekDayTimerWidget({
+    required this.dailySchedule,
+    required this.activeColor,
+    required this.lessonCount,
+  });
+
+  @override
+  State<_WeekDayTimerWidget> createState() => _WeekDayTimerWidgetState();
+}
+
+class _WeekDayTimerWidgetState extends State<_WeekDayTimerWidget> {
+  Timer? _timer;
+  double _progress = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateProgress();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _updateProgress();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _updateProgress() {
+    if (widget.dailySchedule.lessons.isEmpty) return;
+    
+    final now = DateTime.now();
+    double newProgress = 0.0;
+
+    try {
+      // Получаем время первого и последнего урока
+      final firstLesson = widget.dailySchedule.lessons.first;
+      final lastLesson = widget.dailySchedule.lessons.last;
+      
+      final firstTimes = firstLesson.time.split(' - ');
+      final lastTimes = lastLesson.time.split(' - ');
+      
+      if (firstTimes.isNotEmpty && lastTimes.length == 2) {
+        final startParts = firstTimes[0].split(':');
+        final endParts = lastTimes[1].split(':');
+        
+        if (startParts.length == 2 && endParts.length == 2) {
+          final dayStart = DateTime(now.year, now.month, now.day, int.parse(startParts[0]), int.parse(startParts[1]));
+          final dayEnd = DateTime(now.year, now.month, now.day, int.parse(endParts[0]), int.parse(endParts[1]));
+          
+          if (now.isBefore(dayStart)) {
+            newProgress = 0.0;
+          } else if (now.isAfter(dayEnd)) {
+            newProgress = 1.0;
+          } else {
+            final elapsed = now.difference(dayStart).inSeconds.toDouble();
+            final total = dayEnd.difference(dayStart).inSeconds.toDouble();
+            newProgress = (elapsed / total).clamp(0.0, 1.0);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error calculating day progress: $e');
+    }
+
+    if (mounted && _progress != newProgress) {
+      setState(() {
+        _progress = newProgress;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: CustomPaint(
+        painter: _CircleProgressPainter(
+          progress: _progress,
+          progressColor: widget.activeColor,
+          bgColor: widget.activeColor.withOpacity( 0.3),
+          strokeWidth: 2.0,
+        ),
+        child: Center(
+          child: Text(
+            '${widget.lessonCount}',
+            style: TextStyle(
+              color: widget.activeColor,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// ПУНКТ 1: WeekCollapsible - Плавная анимация сворачивания/раскрытия (700ms)
+// ============================================================================
+class WeekCollapsible extends StatefulWidget {
+  final Widget header;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+  final ValueChanged<bool>? onExpansionChanged;
+  final GlobalKey? collapsibleKey;
+  final bool isCurrentDay; // ПУНКТ 1: Флаг текущего дня
+
+  const WeekCollapsible({
+    required this.header,
+    required this.children,
+    this.initiallyExpanded = false,
+    this.onExpansionChanged,
+    this.collapsibleKey,
+    this.isCurrentDay = false, // ПУНКТ 1: По умолчанию false
+    super.key,
+  });
+
+  @override
+  State<WeekCollapsible> createState() => _WeekCollapsibleState();
+}
+
+class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _heightAnimation;
+  bool _expanded = false;
+  bool _isAnimating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700), // Медленная плавная анимация
+    );
+    _heightAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutCubic, // Мягкая кривая
+    );
+    if (_expanded) {
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    if (_isAnimating) {
+      // Перезапуск анимации при быстрых повторных нажатиях
+      debugPrint('ANIMATION: restart | widget: WeekCollapsible');
+      _controller.stop();
+    }
+    
+    setState(() => _isAnimating = true);
+    debugPrint('ANIMATION: start | widget: WeekCollapsible | expanded: ${!_expanded} | timestamp: ${DateTime.now()}');
+    
+    if (!_expanded) {
+      // ПУНКТ 6: Вибрация при раскрытии
+      HapticFeedback.lightImpact();
+      setState(() => _expanded = true);
+      await _controller.forward(from: _controller.value);
+      debugPrint('ANIMATION: expand_complete | duration: 700ms');
+    } else {
+      await _controller.reverse(from: _controller.value);
+      setState(() => _expanded = false);
+      debugPrint('ANIMATION: collapse_complete | duration: 700ms');
+    }
+    
+    setState(() => _isAnimating = false);
+    widget.onExpansionChanged?.call(_expanded);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // ПУНКТЫ 1-4: Правильная логика фона и рамки
+    // Светло-зелёный когда закрыт, тёмно-зелёный когда раскрыт
+    const collapsedBg = Color(0xFFDFF6EE); // Светлый зелёный
+    const expandedBg = Color(0xFF2E8B57); // Тёмный зелёный
+    
+    return AnimatedBuilder(
+      animation: _heightAnimation,
+      builder: (ctx, child) {
+        // Color.lerp для плавного перехода
+        final bg = widget.isCurrentDay 
+          ? Color.lerp(collapsedBg, expandedBg, _heightAnimation.value) 
+          : Colors.white;
+        
+        // Рамка анимируется вместе с раскрытием
+        final borderOpacity = widget.isCurrentDay ? _heightAnimation.value : 0.0;
+        final borderWidth = widget.isCurrentDay ? (2.0 * _heightAnimation.value) : 1.0;
+        final borderColor = widget.isCurrentDay 
+          ? const Color(0xFF409187).withOpacity(0.3 + 0.7 * _heightAnimation.value)
+          : Colors.grey.shade300;
+        
+        return Container(
+          key: widget.collapsibleKey,
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: borderWidth),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.hardEdge, // ПУНКТ 2: Убрать bleeding
+          child: Column(
+            children: [
+              InkWell(
+                onTap: _toggle,
+                child: widget.header,
+              ),
+              SizeTransition(
+                sizeFactor: _heightAnimation,
+                axisAlignment: -1.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  child: Column(
+                    children: [
+                      // Staggered контент
+                      ...widget.children,
+                // Кнопка сворачивания внизу
+                if (_expanded)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Center(
+                      child: InkWell(
+                        onTap: _toggle,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF409187).withOpacity( 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF409187), width: 1),
+                          ),
+                          child: const Icon(
+                            Icons.keyboard_arrow_up,
+                            color: Color(0xFF409187),
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// ПУНКТ 2: StaggeredLessonList - Асинхронная последовательная загрузка
+// ============================================================================
+class StaggeredLessonList extends StatefulWidget {
+  final List<Widget> items;
+  final int msDelay;
+
+  const StaggeredLessonList({
+    required this.items,
+    this.msDelay = 120,
+    super.key,
+  });
+
+  @override
+  State<StaggeredLessonList> createState() => _StaggeredLessonListState();
+}
+
+class _StaggeredLessonListState extends State<StaggeredLessonList> {
+  final List<bool> _visible = [];
+  final List<Timer> _timers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _visible.addAll(List.filled(widget.items.length, false));
+    _schedule();
+  }
+
+  void _schedule() {
+    for (int i = 0; i < widget.items.length; i++) {
+      final timer = Timer(Duration(milliseconds: widget.msDelay * i), () {
+        if (mounted) {
+          setState(() => _visible[i] = true);
+        }
+      });
+      _timers.add(timer);
+    }
+  }
+
+  void _cancel() {
+    for (final timer in _timers) {
+      timer.cancel();
+    }
+    _timers.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List.generate(widget.items.length, (i) {
+        return AnimatedOpacity(
+          opacity: _visible[i] ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeOut,
+          child: AnimatedSlide(
+            offset: _visible[i] ? Offset.zero : const Offset(0, 0.08),
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeOut,
+            child: widget.items[i],
+          ),
+        );
+      }),
+    );
+  }
+}
+
+// ============================================================================
+// ПУНКТ 5: BorderLoader - 3 варианта анимации (A, B, C)
+// ============================================================================
+enum BorderLoaderStyle { 
+  unidirectional,  // A: Однонаправленный бегущий свет
+  bidirectional,   // B: Двунаправленный gradient sweep
+  marching,        // C: Марширующий пунктир
+}
+
+class BorderLoaderWidget extends StatefulWidget {
+  final Widget child;
+  final bool active;
+  final BorderLoaderStyle style;
+  final Color color;
+
+  const BorderLoaderWidget({
+    required this.child,
+    this.active = false,
+    this.style = BorderLoaderStyle.unidirectional,
+    this.color = const Color(0xFF409187),
+    super.key,
+  });
+
+  @override
+  State<BorderLoaderWidget> createState() => _BorderLoaderWidgetState();
+}
+
+class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    if (widget.active) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(BorderLoaderWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !_controller.isAnimating) {
+      _controller.repeat();
+    } else if (!widget.active && _controller.isAnimating) {
+      _controller.stop();
+      _controller.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          foregroundPainter: _getBorderPainter(),
+          child: child,
+        );
+      },
+      child: widget.child,
+    );
+  }
+
+  CustomPainter _getBorderPainter() {
+    final bool isHighlighted = widget.isCurrentDay; // Используем существующее свойство
+    final Color borderColor = Colors.green; // Фиксированный цвет
+    
+    // Возвращаем стандартный painter, так как другие стили не используются в WeekCollapsible
+    return BorderLoaderPainterA(
+      progress: isHighlighted ? _controller.value : 0.0,
+      color: borderColor,
+    );
+  }
+  }
+}
+
+// Painter классы вынесены в widgets/border_painters.dart
