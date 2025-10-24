@@ -1,0 +1,440 @@
+// ВСЕ МЕТОДЫ ДЛЯ ВКЛАДКИ МЕСЯЦ - ВОССТАНОВЛЕНИЕ
+
+// 1. Метод показа диалога выбора месяца
+void _showMonthPickerDialog() {
+  final now = DateTime.now();
+  int displayYear = _monthViewDate.year;
+  
+  final months = [
+    'Январь', 'Февраль', 'Март', 'Апрель',
+    'Май', 'Июнь', 'Июль', 'Август',
+    'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+  ];
+  
+  showDialog(
+    context: context,
+    barrierDismissible: true,
+    builder: (context) {
+      return ScaleTransition(
+        scale: CurvedAnimation(
+          parent: ModalRoute.of(context)!.animation!,
+          curve: Curves.easeOutCubic,
+        ),
+        child: FadeTransition(
+          opacity: CurvedAnimation(
+            parent: ModalRoute.of(context)!.animation!,
+            curve: Curves.easeOut,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final isCurrentYear = displayYear == now.year;
+              
+              return Dialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Container(
+            padding: const EdgeInsets.all(24),
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Год с стрелками
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Стрелка влево
+                    IconButton(
+                      icon: const Icon(Icons.chevron_left, color: Color(0xFF409187)),
+                      onPressed: () {
+                        setDialogState(() {
+                          displayYear--;
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 16),
+                    // Год: зелёный если текущий, серый если другой
+                    Text(
+                      '$displayYear',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: isCurrentYear
+                            ? const Color(0xFF409187) 
+                            : Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // Стрелка вправо
+                    IconButton(
+                      icon: const Icon(Icons.chevron_right, color: 0xFF409187)),
+                      onPressed: () {
+                        setDialogState(() {
+                          displayYear++;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                
+                // Сетка 4×3 месяцев
+                GridView.builder(
+                  shrinkWrap: true,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    childAspectRatio: 1.5,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemCount: 12,
+                  itemBuilder: (context, index) {
+                    final monthNumber = index + 1;
+                    final isCurrentMonth = now.year == displayYear && now.month == monthNumber;
+                    final isSelected = _monthViewDate.year == displayYear && _monthViewDate.month == monthNumber;
+                    
+                    // Цвета по таблице
+                    Color textColor;
+                    Color borderColor;
+                    Color backgroundColor;
+                    
+                    if (isSelected) {
+                      // ВЫБРАННЫЙ месяц (любой) - ВСЕГДА зелёный текст и обводка
+                      textColor = const Color(0xFF409187);
+                      borderColor = const Color(0xFF409187);
+                      backgroundColor = Colors.transparent;
+                    } else if (isCurrentMonth && isCurrentYear) {
+                      // Нынешний месяц текущего года (НЕ выбранный) - зелёный фон + текст + СЕРАЯ обводка
+                      textColor = const Color(0xFF409187);
+                      borderColor = Colors.grey.shade400; // СЕРАЯ обводка!
+                      backgroundColor = const Color(0xFF409187).withOpacity(0.15);
+                    } else if (isCurrentYear) {
+                      // Остальные месяцы текущего года - зелёный текст + серая обводка
+                      textColor = const Color(0xFF409187);
+                      borderColor = Colors.grey.shade400;
+                      backgroundColor = Colors.transparent;
+                    } else {
+                      // Месяцы других годов - серый текст + серая обводка
+                      textColor = Colors.grey.shade600;
+                      borderColor = Colors.grey.shade400;
+                      backgroundColor = Colors.transparent;
+                    }
+                    
+                    return InkWell(
+                      onTap: () {
+                        // Мгновенный выбор - сразу закрываем окно
+                        setState(() {
+                          _monthViewDate = DateTime(displayYear, monthNumber);
+                        });
+                        Navigator.pop(context);
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: backgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: borderColor,
+                            width: isSelected ? 2.5 : 1.5,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            months[index],
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              color: textColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+              );
+            },
+          ),
+        ),
+      );
+    },
+  );
+}
+
+// 2. Основной метод календаря месяца
+Widget _buildMonthCalendar(BuildContext context) {
+  if (fullSchedule.isEmpty) return Container();
+
+  final now = DateTime.now();
+  final months = [
+    'Январь', 'Февраль', 'Март', 'Апрель',
+    'Май', 'Июнь', 'Июль', 'Август',
+    'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+  ];
+  
+  final currentMonth = _monthViewDate.month;
+  final currentYear = _monthViewDate.year;
+  final monthName = months[currentMonth - 1];
+  final isCurrentMonth = now.year == currentYear && now.month == currentMonth;
+  
+  // Проверяем, можно ли вернуться к текущему месяцу стрелками
+  final prevMonth = DateTime(_monthViewDate.year, _monthViewDate.month - 1);
+  final nextMonth = DateTime(_monthViewDate.year, _monthViewDate.month + 1);
+  final isPrevMonthCurrent = prevMonth.year == now.year && prevMonth.month == now.month;
+  final isNextMonthCurrent = nextMonth.year == now.year && nextMonth.month == now.month;
+  const activeColor = Color(0xFF409187);
+
+  return Column(
+    children: [
+      // Quick Jump для месяца (точно как на День/Неделя)
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Стрелка влево (с динамической подсветкой)
+          InkWell(
+            onTap: () {
+              setState(() {
+                _navigationDirection = 1; // Анимация вправо
+                _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month - 1);
+              });
+            },
+            borderRadius: BorderRadius.circular(50),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isPrevMonthCurrent ? activeColor.withOpacity(0.2) : Colors.transparent,
+                border: Border.all(
+                  color: isPrevMonthCurrent ? activeColor : Colors.grey.shade300,
+                  width: 2,
+                ),
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Icon(
+                      Icons.arrow_back_ios,
+                      key: ValueKey(isPrevMonthCurrent),
+                      size: 18,
+                      color: isPrevMonthCurrent ? activeColor : Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
+          // Quick Jump - месяц в овале (с фоном если текущий)
+          InkWell(
+            onTap: _showMonthPickerDialog,
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                // Текущий месяц - зелёный фон
+                color: isCurrentMonth 
+                    ? const Color(0xFF409187).withOpacity(0.2)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFF409187),
+                  width: 2,
+                ),
+              ),
+              child: Text(
+                monthName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF409187),
+                ),
+              ),
+            ),
+          ),
+          
+          // Стрелка вправо (с динамической подсветкой)
+          InkWell(
+            onTap: () {
+              setState(() {
+                _navigationDirection = -1; // Анимация влево
+                _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month + 1);
+              });
+            },
+            borderRadius: BorderRadius.circular(50),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isNextMonthCurrent ? activeColor.withOpacity(0.2) : Colors.transparent,
+                border: Border.all(
+                  color: isNextMonthCurrent ? activeColor : Colors.grey.shade300,
+                  width: 2,
+                ),
+              ),
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Icon(
+                    Icons.arrow_forward_ios,
+                    key: ValueKey(isNextMonthCurrent),
+                    size: 18,
+                    color: isNextMonthCurrent ? activeColor : Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      
+      // Календарь дней месяца
+      _buildMonthDaysCalendar(),
+    ],
+  );
+}
+
+// 3. Календарь дней месяца
+Widget _buildMonthDaysCalendar() {
+  final selectedMonth = _monthViewDate.month;
+  final selectedYear = _monthViewDate.year;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  
+  // Получаем первый день месяца
+  final firstDayOfMonth = DateTime(selectedYear, selectedMonth, 1);
+  // Получаем последний день месяца
+  final lastDayOfMonth = DateTime(selectedYear, selectedMonth + 1, 0);
+  final daysInMonth = lastDayOfMonth.day;
+  
+  // Определяем с какого дня недели начинается месяц (1 = Пн, 7 = Вс)
+  int firstWeekday = firstDayOfMonth.weekday;
+  
+  // Создаём список всех дней для отображения
+  List<DateTime?> calendarDays = [];
+  
+  // Добавляем пустые ячейки для дней предыдущего месяца
+  for (int i = 1; i < firstWeekday; i++) {
+    calendarDays.add(null);
+  }
+  
+  // Добавляем дни текущего месяца
+  for (int day = 1; day <= daysInMonth; day++) {
+    calendarDays.add(DateTime(selectedYear, selectedMonth, day));
+  }
+  
+  final months = [
+    'Январь', 'Февраль', 'Март', 'Апрель',
+    'Май', 'Июнь', 'Июль', 'Август',
+    'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+  ];
+  
+  return Card(
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Дни недели (убрали заголовок месяца - он уже есть сверху)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+                .map((day) => SizedBox(
+                      width: 40,
+                      child: Center(
+                        child: Text(
+                          day,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+          const SizedBox(height: 8),
+          
+          // Сетка дней
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              childAspectRatio: 1,
+              crossAxisSpacing: 4,
+              mainAxisSpacing: 4,
+            ),
+            itemCount: calendarDays.length,
+            itemBuilder: (context, index) {
+              final day = calendarDays[index];
+              
+              if (day == null) {
+                return const SizedBox();
+              }
+              
+              final isToday = day.year == today.year && 
+                             day.month == today.month && 
+                             day.day == today.day;
+              final isSelected = _selectedDay != null &&
+                                day.year == _selectedDay!.year &&
+                                day.month == _selectedDay!.month &&
+                                day.day == _selectedDay!.day;
+              final isCurrentMonth = day.month == selectedMonth;
+              
+              return InkWell(
+                onTap: () {
+                  setState(() {
+                    _selectedDay = day;
+                    _currentDate = day;
+                  });
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  decoration: BoxDecoration(
+                    // Сегодня - зелёный фон
+                    color: isToday 
+                        ? const Color(0xFF409187).withOpacity(0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      // ТОЛЬКО выбранный день имеет обводку
+                      color: isSelected
+                          ? const Color(0xFF409187)
+                          : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${day.day}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        // Дни текущего месяца - зелёные, остальные - серые
+                        color: isCurrentMonth
+                            ? const Color(0xFF409187)
+                            : Colors.grey.shade400,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}

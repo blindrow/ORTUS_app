@@ -1,0 +1,1 @@
+keytool -genkey -v -keystore ortus-release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias ortus-key -storepass ortus123456 -keypass ortus123456 -dname "CN=ORTUS, OU=Mobile, O=ORTUS, L=Moscow, S=Moscow, C=RU"
