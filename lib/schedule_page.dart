@@ -1222,46 +1222,54 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                       ),
                       child: const Icon(Icons.apps, color: Colors.white, size: 36),
                     ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Открыть Microsoft PowerApps?',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.of(context).pop('open'),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Открыть PowerApps',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 20),
+                  // MIKE: offer open/install actions without explicit close button
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          debugPrint('EVENT: powerapps_launch_confirmed | source: button | timestamp: ${DateTime.now()}');
+                          await _launchPowerApps(deepLink: deepLink);
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF742774),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: const Text('Открыть', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Открыть',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop('install'),
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          debugPrint('EVENT: powerapps_install_redirect | timestamp: ${DateTime.now()}');
+                          await _openStoreForPowerApps();
+                        },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF742774),
-                          side: const BorderSide(color: Color(0xFF742774), width: 2),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          side: const BorderSide(color: Color(0xFF742774), width: 1.5),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: const Text('Установить', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Установить',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                       ),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop('cancel'),
-                      child: const Text('Отмена'),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
@@ -1283,16 +1291,19 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
       Uri.parse('com.microsoft.msapps://open'),
     ];
 
-    for (final scheme in schemes) {
-      // MIKE: пробуем нативные схемы PowerApps в предписанном порядке
-      try {
+    try {
+      final schemes = <Uri>[
+        Uri.parse('com.microsoft.powerapps://'),
+        Uri.parse('ms-powerapps://'),
+        Uri.parse('com.microsoft.msapps://open'),
+      ];
+
+      for (final scheme in schemes) {
         if (await canLaunchUrl(scheme)) {
           await launchUrl(scheme, mode: LaunchMode.externalApplication);
-          debugPrint('EVENT: powerapps_launch_scheme | uri: $scheme');
+          debugPrint('PowerApps launched via scheme: ${scheme.scheme}');
           return;
         }
-      } catch (error) {
-        debugPrint('WARN: powerapps_scheme_failed | uri: $scheme | error: $error');
       }
     }
 
@@ -1304,38 +1315,40 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
           debugPrint('EVENT: powerapps_launch_deeplink | uri: $deepLink');
           return;
         }
-      } catch (error) {
-        debugPrint('WARN: powerapps_deeplink_failed | uri: $deepLink | error: $error');
+      }
+
+      await _openStoreForPowerApps(); // MIKE: fall back to store redirect when app/deep link unavailable
+    } catch (e) {
+      debugPrint('Error launching PowerApps: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     }
-
-    await _openStoreForPowerApps(); // MIKE: если запуск не удался, переводим пользователя в магазин
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('PowerApps не найден. Открылся магазин приложений'),
-        duration: Duration(seconds: 4),
-      ),
-    );
   }
 
   Future<void> _openStoreForPowerApps() async {
-    final TargetPlatform platform = Theme.of(context).platform;
-    final Uri storeUri = platform == TargetPlatform.iOS
+    final Uri storeUri = Theme.of(context).platform == TargetPlatform.iOS
         ? Uri.parse('https://apps.apple.com/app/microsoft-power-apps/id1047318566')
         : Uri.parse('https://play.google.com/store/apps/details?id=com.microsoft.msapps');
+
     if (await canLaunchUrl(storeUri)) {
       await launchUrl(storeUri, mode: LaunchMode.externalApplication);
+      debugPrint('PowerApps store redirect launched');
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Не удалось открыть магазин: $storeUri'),
-          duration: const Duration(seconds: 4),
+        const SnackBar(
+          content: Text('Не удалось открыть магазин для PowerApps'),
+          duration: Duration(seconds: 3),
         ),
       );
     }
   }
-
+  
   void _showMonthPickerDialog() {
     debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
     final DateTime now = DateTime.now();
@@ -3100,7 +3113,7 @@ Widget _buildModeSwitcher(Color activeColor) {
         borderRadius: BorderRadius.circular(16),
         // MIKE: убираем разделительную рамку между банданой и телом карты
       ),
-      clipBehavior: Clip.hardEdge, // MIKE: обрезаем содержимое, чтобы верхняя плашка сливалась с карточкой
+      clipBehavior: Clip.hardEdge, // MIKE: avoid divider lines between bandana and body
       child: Container(
         height: MediaQuery.of(context).size.height * 0.65,
         padding: const EdgeInsets.all(12),
@@ -3392,7 +3405,7 @@ class LessonTile extends StatefulWidget {
 class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  bool _borderLoading = false; // MIKE: флаг запуска подсветки рамки
+  bool _borderLoading = false;
   bool _isPressedTitle = false;
   Timer? _longPressTimer;
 
@@ -3839,7 +3852,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                 GestureDetector(
                   onTap: () {
                     setState(() {
-                      _borderLoading = !_borderLoading; // MIKE: переключаем бордер-анимацию
+                      _borderLoading = !_borderLoading;
                       debugPrint('EVENT: lesson_title_tap | lesson: ${widget.title} | timestamp: ${DateTime.now()}');
                     });
                   },
@@ -3877,23 +3890,23 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 200),
-                              child: _borderLoading
-                                  ? const SizedBox(
-                                      key: ValueKey('loading'),
-                                      width: 20,
-                                      height: 20,
-                                    )
-                                  : const Text(
-                                      '🎓',
-                                      key: ValueKey('emoji'),
-                                      style: TextStyle(fontSize: 20),
-                                    ),
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 8),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: _borderLoading
+                                ? const SizedBox(
+                                    key: ValueKey('loading'),
+                                    width: 20,
+                                    height: 20,
+                                  )
+                                : const Text(
+                                    '🎓',
+                                    key: ValueKey('emoji'),
+                                    style: TextStyle(fontSize: 20),
+                                  ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -4527,26 +4540,30 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            
+
             SizedBox(
-              height: 140, // MIKE: фиксированная высота секции таймера, чтобы макет не прыгал
+              height: 140,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: widget.color.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Stack(
-                      children: [
-                        Align(
-                          alignment: _showElapsed ? Alignment.centerLeft : Alignment.centerRight,
-                          child: FractionallySizedBox(
+                  // MIKE: highlight elapsed vs remaining segments without resizing dialog
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final maxWidth = constraints.maxWidth;
+                      final clamped = _progress.clamp(0.0, 1.0);
+                      final fillWidth = (_showElapsed ? clamped : (1 - clamped)) * maxWidth;
+
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          height: 12,
+                          color: widget.color.withOpacity(0.18),
+                          child: Align(
                             alignment: _showElapsed ? Alignment.centerLeft : Alignment.centerRight,
-                            widthFactor: (_showElapsed ? _progress : (1.0 - _progress)).clamp(0.0, 1.0),
-                            child: Container(
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOutCubic,
+                              width: fillWidth.clamp(0.0, maxWidth).toDouble(),
                               decoration: BoxDecoration(
                                 color: _showElapsed ? widget.color : widget.color.withOpacity(0.65),
                                 borderRadius: BorderRadius.circular(6),
@@ -4554,8 +4571,8 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 20),
                   GestureDetector(
@@ -5051,7 +5068,8 @@ class BorderLoaderWidget extends StatefulWidget {
   State<BorderLoaderWidget> createState() => _BorderLoaderWidgetState();
 }
 
-class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTickerProviderStateMixin {
+class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
@@ -5059,12 +5077,12 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
     super.initState();
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1500),
-      vsync: this,
     )..addListener(() {
         if (widget.active && mounted) {
-          setState(() {}); // MIKE: перерисовываем границу пока идёт анимация
+          setState(() {});
         }
       });
+
     if (widget.active) {
       _controller.repeat();
     }
@@ -5089,14 +5107,26 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
 
   @override
   Widget build(BuildContext context) {
-    final painter = _resolvePainter(widget.style, widget.color, _controller.value, widget.active);
+    final painter = _resolvePainter(
+      widget.style,
+      widget.color,
+      widget.active ? _controller.value : 0,
+      widget.active,
+    );
+
+    // MIKE: reuse reusable border loader painter stack for lesson title highlight
     return CustomPaint(
       foregroundPainter: painter,
       child: widget.child,
     );
   }
 
-  CustomPainter? _resolvePainter(BorderLoaderStyle style, Color color, double progress, bool active) {
+  CustomPainter? _resolvePainter(
+    BorderLoaderStyle style,
+    Color color,
+    double progress,
+    bool active,
+  ) {
     if (!active) return null;
     switch (style) {
       case BorderLoaderStyle.unidirectional:
@@ -5108,5 +5138,3 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
     }
   }
 }
-
-// Painter классы вынесены в widgets/border_painters.dart
