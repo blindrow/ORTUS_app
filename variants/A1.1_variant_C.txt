@@ -1,0 +1,293 @@
+// Variant C — Calendar-centric implementation
+// Files: lib/schedule_page.dart (apply patch below)
+
+--- a/lib/schedule_page.dart
++++ b/lib/schedule_page.dart
+@@
+-  late DateTime _monthViewDate;
+-  DateTime? _selectedDay;
++  late DateTime _monthViewDate;
++  DateTime? _selectedDay;
++  DateTime get _today => DateTime.now();
+@@
+-    _monthViewDate = DateTime(now.year, now.month, now.day);
+-    _selectedDay = _currentDate;
++    _monthViewDate = DateTime(now.year, now.month, now.day);
++    _selectedDay = _currentDate;
+@@
+-  Widget _buildMonthCalendar(BuildContext context) {
++  Widget _buildMonthCalendar(BuildContext context) {
+@@
+-          selectedDayPredicate: (day) {
+-            return _selectedDay != null && isSameDay(_selectedDay, day);
+-          },
++          selectedDayPredicate: (day) {
++            return _selectedDay != null && isSameDay(_selectedDay, day);
++          },
+           onDaySelected: (selectedDay, focusedDay) {
+             if (!isSameDay(_selectedDay, selectedDay)) {
+               setState(() {
+                 _selectedDay = selectedDay;
+                 _monthViewDate = focusedDay;
+                 _currentDate = selectedDay;
+               });
+             }
+           },
+@@
+-          calendarStyle: CalendarStyle(
+-            todayDecoration: const BoxDecoration(color: Colors.transparent),
+-            selectedDecoration: const BoxDecoration(color: Colors.transparent),
+-          ),
++          calendarStyle: const CalendarStyle(
++            todayDecoration: BoxDecoration(color: Colors.transparent),
++            selectedDecoration: BoxDecoration(color: Colors.transparent),
++            outsideDaysVisible: true,
++          ),
+           calendarBuilders: CalendarBuilders(
+             todayBuilder: (context, day, focusedDay) {
+-              final bool isSelected = _selectedDay != null && isSameDay(_selectedDay, day);
+-              return AnimatedContainer(
+-                duration: const Duration(milliseconds: 250),
+-                margin: const EdgeInsets.all(4),
+-                decoration: BoxDecoration(
+-                  color: isSelected
+-                      ? const Color(0xFF409187)
+-                      : const Color(0xFF409187).withOpacity(0.18),
+-                  border: Border.all(
+-                    color: isSelected
+-                        ? const Color(0xFF409187)
+-                        : Colors.grey.shade400,
+-                    width: 2,
+-                  ),
+-                  borderRadius: BorderRadius.circular(8),
+-                ),
+-                child: Center(
+-                  child: Text(
+-                    '${day.day}',
+-                    style: TextStyle(
+-                      fontWeight: FontWeight.bold,
+-                      color: isSelected ? Colors.white : const Color(0xFF409187),
+-                    ),
+-                  ),
+-                ),
+-              );
++              final bool isSelected = _selectedDay != null && isSameDay(_selectedDay, day);
++              return AnimatedContainer(
++                duration: const Duration(milliseconds: 240),
++                margin: const EdgeInsets.all(4),
++                decoration: BoxDecoration(
++                  color: isSelected
++                      ? const Color(0xFF409187)
++                      : const Color(0xFF409187).withOpacity(0.2),
++                  border: Border.all(
++                    color: isSelected ? const Color(0xFF409187) : Colors.grey.shade400,
++                    width: 2,
++                  ),
++                  borderRadius: BorderRadius.circular(8),
++                ),
++                child: Center(
++                  child: Text(
++                    '${day.day}',
++                    style: TextStyle(
++                      fontWeight: FontWeight.bold,
++                      color: isSelected ? Colors.white : const Color(0xFF409187),
++                    ),
++                  ),
++                ),
++              );
+             },
+             selectedBuilder: (context, day, focusedDay) {
+-              final bool isToday = isSameDay(day, DateTime.now());
+-              return AnimatedContainer(
+-                duration: const Duration(milliseconds: 250),
+-                margin: const EdgeInsets.all(4),
+-                decoration: BoxDecoration(
+-                  color: isToday ? const Color(0xFF409187) : Colors.transparent,
+-                  border: Border.all(color: const Color(0xFF409187), width: 2),
+-                  borderRadius: BorderRadius.circular(8),
+-                ),
+-                child: Center(
+-                  child: Text(
+-                    '${day.day}',
+-                    style: TextStyle(
+-                      fontWeight: FontWeight.bold,
+-                      color: isToday ? Colors.white : const Color(0xFF409187),
+-                    ),
+-                  ),
+-                ),
+-              );
++              final bool isToday = isSameDay(day, _today);
++              return AnimatedContainer(
++                duration: const Duration(milliseconds: 240),
++                margin: const EdgeInsets.all(4),
++                decoration: BoxDecoration(
++                  color: isToday ? const Color(0xFF409187) : Colors.transparent,
++                  border: Border.all(color: const Color(0xFF409187), width: 2),
++                  borderRadius: BorderRadius.circular(8),
++                ),
++                child: Center(
++                  child: Text(
++                    '${day.day}',
++                    style: TextStyle(
++                      fontWeight: FontWeight.bold,
++                      color: isToday ? Colors.white : const Color(0xFF409187),
++                    ),
++                  ),
++                ),
++              );
+             },
+           ),
+         ),
+       ),
+     );
+   }
+@@
+-  void _showMonthPickerDialog() {
+-    debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
+-    final activeColor = const Color(0xFF409187);
+-    var year = _monthViewDate.year;
+-
+-    showDialog(
+-      context: context,
+-      barrierDismissible: true,
+-      builder: (ctx) {
+-        return Dialog(
+-          backgroundColor: Colors.transparent,
+-          insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+-          child: StatefulBuilder(
+-            builder: (context, setStateDialog) {
+-              return _MonthPickerDialog(
+-                displayYear: year,
+-                activeColor: activeColor,
+-                onYearChanged: (value) => setStateDialog(() => year = value),
+-                onSelect: (month) {
+-                  final newDate = DateTime(year, month, 1);
+-                  setState(() {
+-                    _monthViewDate = newDate;
+-                    _currentDate = newDate;
+-                    _selectedDay = null;
+-                  });
+-                  Navigator.of(context).pop();
+-                },
+-              );
+-            },
+-          ),
+-        );
+-      },
+-    );
+-  }
++  void _showMonthPickerDialog() {
++    debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
++    final activeColor = const Color(0xFF409187);
++    var year = _monthViewDate.year;
++
++    showDialog(
++      context: context,
++      barrierDismissible: true,
++      builder: (ctx) {
++        return Dialog(
++          backgroundColor: Colors.transparent,
++          insetPadding: const EdgeInsets.symmetric(horizontal: 24),
++          child: StatefulBuilder(
++            builder: (context, setStateDialog) {
++              return _MonthPickerDialog(
++                displayYear: year,
++                activeColor: activeColor,
++                onYearChanged: (value) => setStateDialog(() => year = value),
++                onSelect: (month) {
++                  final newDate = DateTime(year, month, 1);
++                  setState(() {
++                    _monthViewDate = newDate;
++                    _currentDate = newDate;
++                    _selectedDay = null;
++                  });
++                  Navigator.of(context).pop();
++                },
++              );
++            },
++          ),
++        );
++      },
++    );
++  }
+@@
+-  Widget _buildModeButton(
+-    String label,
+-    ScheduleViewMode mode,
+-    GlobalKey key,
+-    Color activeColor,
+-  ) {
+-    final isActive = _currentMode == mode;
+-    return Expanded(
+-      child: InkWell(
+-        key: key,
+-        borderRadius: BorderRadius.circular(30),
+-        onTap: () {
+-          if (isActive && mode == ScheduleViewMode.month) {
+-            _showMonthPickerDialog();
+-            return;
+-          }
+-          setState(() {
+-            _previousMode = _currentMode;
+-            _currentMode = mode;
+-            if (mode == ScheduleViewMode.month && _selectedDay != null) {
+-              _currentDate = _selectedDay!;
+-            }
+-          });
+-        },
+-        child: Container(
+-          alignment: Alignment.center,
+-          padding: const EdgeInsets.symmetric(vertical: 8),
+-          child: AnimatedDefaultTextStyle(
+-            duration: const Duration(milliseconds: 200),
+-            style: TextStyle(
+-              color: isActive ? Colors.white : activeColor,
+-              fontWeight: FontWeight.bold,
+-              fontSize: 14,
+-            ),
+-            child: Text(label),
+-          ),
+-        ),
+-      ),
+-    );
+-  }
++  Widget _buildModeButton(
++    String label,
++    ScheduleViewMode mode,
++    GlobalKey key,
++    Color activeColor,
++  ) {
++    final isActive = _currentMode == mode;
++    return Expanded(
++      child: InkWell(
++        key: key,
++        borderRadius: BorderRadius.circular(30),
++        onTap: () {
++          if (isActive && mode == ScheduleViewMode.month) {
++            _showMonthPickerDialog();
++            return;
++          }
++          setState(() {
++            _previousMode = _currentMode;
++            _currentMode = mode;
++            if (mode == ScheduleViewMode.month && _selectedDay != null) {
++              _currentDate = _selectedDay!;
++            }
++          });
++        },
++        child: Container(
++          alignment: Alignment.center,
++          padding: const EdgeInsets.symmetric(vertical: 8),
++          child: AnimatedDefaultTextStyle(
++            duration: const Duration(milliseconds: 200),
++            style: TextStyle(
++              color: isActive ? Colors.white : activeColor,
++              fontWeight: FontWeight.bold,
++              fontSize: 14,
++            ),
++            child: Text(label),
++          ),
++        ),
++      ),
++    );
++  }
