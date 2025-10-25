@@ -663,6 +663,14 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     _currentWeekDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Week view
     _monthViewDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Month view
     _focusedDay = _currentDate;
+    fullSchedule = ScheduleService.fetchSchedule();
+    
+    // Инициализируем _selectedDay после первого кадра
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        _selectedDay = DateTime(now.year, now.month, now.day);
+      });
+    });
     _selectedDay = _currentDate; // MIKE: выделяем сегодняшний день сразу при запуске вкладки "Месяц"
     fullSchedule = ScheduleService.fetchSchedule();
     
@@ -1177,6 +1185,118 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     );
   }
 
+  void _showPowerAppsDialog({String deepLink = ''}) async {
+    debugPrint('EVENT: powerapps_dialog_open | timestamp: ${DateTime.now()} | deepLink: $deepLink');
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF742774), Color(0xFFD946A0)],
+                    ),
+                  ),
+                  child: const Icon(Icons.apps, size: 60, color: Colors.white),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Открыть Microsoft Power Apps?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop('open'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF742774),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Открыть', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop('install'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF742774),
+                      side: const BorderSide(color: Color(0xFF742774), width: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Установить', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    switch (result) {
+      case 'open':
+        debugPrint('EVENT: powerapps_launch_confirmed | timestamp: ${DateTime.now()}');
+        final launched = await _launchPowerApps(deepLink: deepLink);
+        if (!launched && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Power Apps не найдены. Установите приложение.'),
+              action: SnackBarAction(
+                label: 'Установить',
+                onPressed: () => _openStoreForPowerApps(),
+              ),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        break;
+      case 'install':
+        await _openStoreForPowerApps();
+        break;
+      default:
+        debugPrint('EVENT: powerapps_launch_cancelled | timestamp: ${DateTime.now()}');
+    }
+  }
+
+  Future<bool> _launchPowerApps({String deepLink = ''}) async {
+    final schemes = <Uri>[
+      Uri.parse('com.microsoft.powerapps://'),
+      Uri.parse('ms-powerapps://'),
+      Uri.parse('com.microsoft.msapps://open'),
+    ];
+
+    for (final scheme in schemes) {
+      try {
+        if (await canLaunchUrl(scheme)) {
+          await launchUrl(scheme, mode: LaunchMode.externalApplication);
+          return true;
   Future<void> _showPowerAppsDialog(String deepLink) async {
     // MIKE: подтверждаем запуск PowerApps через единый диалог с вариантами Open/Install
     debugPrint('EVENT: powerapps_dialog_open | timestamp: ${DateTime.now()}');
@@ -1325,13 +1445,56 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
           debugPrint('EVENT: powerapps_launch_deeplink | uri: $deepLink');
           return;
         }
+      } catch (e) {
+        debugPrint('Failed to launch PowerApps scheme $scheme: $e');
       }
+    }
 
+    if (deepLink.isNotEmpty) {
+      final uri = Uri.tryParse(deepLink);
+      if (uri != null) {
+        try {
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            return true;
+          }
+        } catch (e) {
+          debugPrint('Failed to launch deep link $uri: $e');
+        }
+      }
+    }
+
+    return false;
+  }
+
+  Future<void> _openStoreForPowerApps() async {
+    final platform = Theme.of(context).platform;
+    final Uri storeUri = platform == TargetPlatform.iOS
+        ? Uri.parse('https://apps.apple.com/app/microsoft-power-apps/id1047318566')
+        : Uri.parse('https://play.google.com/store/apps/details?id=com.microsoft.msapps');
+
+    try {
+      if (!await launchUrl(storeUri, mode: LaunchMode.externalApplication) && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть магазин приложений')),
+        );
+      }
       await _openStoreForPowerApps(); // MIKE: fall back to store redirect when app/deep link unavailable
     } catch (e) {
-      debugPrint('Error launching PowerApps: $e');
+      debugPrint('Failed to open store: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось открыть магазин: $e')),
+        );
+      }
+    }
+  }
+
+  void _showMonthPickerDialog() {
+    debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
+    final now = DateTime.now();
+    int selectedYear = _monthViewDate.year;
+    int selectedMonth = _monthViewDate.month;
           SnackBar(
             content: Text('Ошибка: $e'),
             duration: const Duration(seconds: 3),
@@ -1372,6 +1535,99 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black.withOpacity( 0.5),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return ScaleTransition(
+              scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
+              child: FadeTransition(
+                opacity: animation,
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity( 0.2),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              IconButton(
+                                icon: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
+                                  ),
+                                  child: const Icon(Icons.chevron_left, color: Color(0xFF409187)),
+                                ),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    selectedYear--;
+                                  });
+                                },
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  color: selectedYear == now.year 
+                                      ? const Color(0xFF409187)
+                                      : Colors.grey.shade200,
+                                ),
+                                child: Text(
+                                  '$selectedYear',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: selectedYear == now.year ? Colors.white : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
+                                  ),
+                                  child: const Icon(Icons.chevron_right, color: Color(0xFF409187)),
+                                ),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    selectedYear++;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              childAspectRatio: 2.5,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
       barrierColor: Colors.black.withOpacity(0.6),
       builder: (context) {
         return Dialog(
@@ -2333,6 +2589,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             _showMonthPickerDialog(); // MIKE: повторный тап по активной вкладке "Месяц" открывает квик-пикер
             return;
           }
+
           setState(() {
             _previousViewMode = _currentMode;
             _currentMode = mode;
@@ -3073,6 +3330,39 @@ Widget _buildModeSwitcher(Color activeColor) {
             final isToday = day.year == DateTime.now().year &&
                 day.month == DateTime.now().month &&
                 day.day == DateTime.now().day;
+
+            if (isToday) return null; // Используем todayBuilder
+
+            // ПУНКТ 22: выбранный день (если не сегодня) — только зелёная рамка
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                border: Border.all(
+                  color: const Color(0xFF409187),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: const TextStyle(
+                    color: Color(0xFF409187),
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : const Color(0xFF409187),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          },
+          selectedBuilder: (context, day, focusedDay) {
+            final isToday = day.year == DateTime.now().year &&
+                day.month == DateTime.now().month &&
+                day.day == DateTime.now().day;
             
             if (isToday) return null; // Используем todayBuilder
             
@@ -3174,6 +3464,9 @@ Widget _buildModeSwitcher(Color activeColor) {
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
+        // MIKE: убираем разделительную рамку, чтобы «бандана» сливалась с контентом
+      ),
+      clipBehavior: Clip.hardEdge,
         // MIKE: убираем разделительную рамку между банданой и телом карты
       ),
       clipBehavior: Clip.hardEdge, // MIKE: avoid divider lines between bandana and body
@@ -3246,6 +3539,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                   type: lesson.type, 
                   format: lesson.format,
                   isToday: isToday,
+                  onPowerAppsPressed: (link) => _showPowerAppsDialog(deepLink: link),
                   onPowerAppsPressed: (link) => _showPowerAppsDialog(link),
                   onTeacherTap: () => _showTeacherInfo(lesson.teacher),
                   examNote: lesson.examNote,
@@ -3405,6 +3699,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                           type: lesson.type,
                           format: lesson.format,
                           isToday: isToday,
+                          onPowerAppsPressed: (link) => _showPowerAppsDialog(deepLink: link),
                           onPowerAppsPressed: (link) => _showPowerAppsDialog(link),
                           onTeacherTap: () => _showTeacherInfo(lesson.teacher),
                           examNote: lesson.examNote,
@@ -3469,6 +3764,7 @@ class LessonTile extends StatefulWidget {
 class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
+  bool _isLoading = false;
   bool _borderLoading = false;
   bool _isPressedTitle = false;
   Timer? _longPressTimer;
@@ -3785,6 +4081,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                         InkWell(
                           onTap: () => _showLessonTypeBottomSheet(context, typeColor),
                           child: Container(
+                            padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                             padding: const EdgeInsets.only(left: 0, right: 8, top: 6, bottom: 6), // MIKE: выравниваем тип урока строго по левому краю
                             child: Text(
                               formatText,
@@ -3861,6 +4158,9 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                         if (widget.isToday) ...[
                           const SizedBox(width: 8),
                         InkWell(
+                          onTap: () {
+                            widget.onPowerAppsPressed?.call(widget.deepLink);
+                          },
                           onTap: () => widget.onPowerAppsPressed?.call(widget.deepLink), // MIKE: выносим открытие PowerApps в общий диалог
                           child: Container(
                             width: 28,
@@ -3916,6 +4216,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                 GestureDetector(
                   onTap: () {
                     setState(() {
+                      _isLoading = !_isLoading;
                       _borderLoading = !_borderLoading;
                       debugPrint('EVENT: lesson_title_tap | lesson: ${widget.title} | timestamp: ${DateTime.now()}');
                     });
@@ -3934,6 +4235,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                     duration: const Duration(milliseconds: 150),
                     curve: Curves.easeOut,
                     child: BorderLoaderWidget(
+                      active: _isLoading,
                       active: _borderLoading,
                       style: BorderLoaderStyle.unidirectional,
                       color: typeColor,
@@ -3954,6 +4256,23 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      key: ValueKey('loading'),
+                                      width: 20,
+                                      height: 20,
+                                    )
+                                  : const Text(
+                                      '🎓',
+                                      key: ValueKey('emoji'),
+                                      style: TextStyle(fontSize: 20),
+                                    ),
+                            ),
+                          ],
+                        ),
                           ),
                           const SizedBox(width: 8),
                           AnimatedSwitcher(
@@ -5014,6 +5333,7 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
     _expanded = widget.initiallyExpanded;
     _controller = AnimationController(
       vsync: this,
+      duration: const Duration(milliseconds: 1000), // MIKE: плавное медленное раскрытие (~1s)
       duration: const Duration(milliseconds: 1000), // MIKE: замедляем раскрытие свёртков до ~1 секунды
     );
     _heightAnimation = CurvedAnimation(
@@ -5072,6 +5392,8 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
           ? Color.lerp(collapsedBg, expandedBg, _heightAnimation.value) 
           : Colors.white;
         
+        // Постоянная зелёная рамка для текущего дня, серый контур для остальных
+        final borderWidth = widget.isCurrentDay ? 2.0 : 1.0;
         // Рамка анимируется вместе с раскрытием
         final borderWidth = widget.isCurrentDay ? 2.0 : 1.0; // MIKE: зелёная рамка всегда видима для текущего дня
         final borderColor = widget.isCurrentDay
@@ -5120,6 +5442,7 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                 decoration: BoxDecoration(
+                                  color: const Color(0xFF409187).withOpacity( 0.1),
                                   color: const Color(0xFF409187).withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: const Color(0xFF409187), width: 1),
@@ -5129,13 +5452,15 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
                                   color: Color(0xFF409187),
                                   size: 20,
                                 ),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -5281,6 +5606,11 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
 
   @override
   Widget build(BuildContext context) {
+    return CustomPaint(
+      foregroundPainter: widget.active
+          ? _resolvePainter(widget.style, widget.color, _controller.value)
+          : null,
+      child: widget.child,
     final painter = _resolvePainter(
       widget.style,
       widget.color,
@@ -5288,6 +5618,8 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
       widget.active,
     );
 
+  CustomPainter _resolvePainter(BorderLoaderStyle style, Color color, double progress) {
+    switch (style) {
     // MIKE: reuse reusable border loader painter stack for lesson title highlight
     return CustomPaint(
       foregroundPainter: painter,
@@ -5309,6 +5641,9 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
         return BorderLoaderPainterB(progress: progress, color: color);
       case BorderLoaderStyle.marching:
         return BorderLoaderPainterC(progress: progress, color: color);
+      case BorderLoaderStyle.unidirectional:
+      default:
+        return BorderLoaderPainterA(progress: progress, color: color);
     }
   }
 }
