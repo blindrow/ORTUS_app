@@ -49,77 +49,6 @@ class DailySchedule {
   });
 }
 
-// Painter для анимации загрузки по периметру рамки
-class _BorderLoadingPainter extends CustomPainter {
-  final double progress;
-  final Color color;
-
-  _BorderLoadingPainter({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(8),
-    );
-
-    final path = Path()..addRRect(rect);
-    final pathMetrics = path.computeMetrics().first;
-    final totalLength = pathMetrics.length;
-    
-    // Рисуем свечение (glow effect)
-    final glowPaint = Paint()
-      ..color = color.withOpacity( 0.3)
-      ..strokeWidth = 6
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    
-    final currentLength = totalLength * progress;
-    final glowPath = pathMetrics.extractPath(0, currentLength);
-    canvas.drawPath(glowPath, glowPaint);
-    
-    // Рисуем основную линию с градиентом
-    final mainPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          color.withOpacity( 0.4),
-          color,
-          color,
-        ],
-        stops: const [0.0, 0.7, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final extractPath = pathMetrics.extractPath(0, currentLength);
-    canvas.drawPath(extractPath, mainPaint);
-    
-    // Рисуем яркую точку на конце (leading dot)
-    if (progress > 0 && progress < 1) {
-      final dotPosition = pathMetrics.getTangentForOffset(currentLength)?.position;
-      if (dotPosition != null) {
-        final dotPaint = Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.fill;
-        canvas.drawCircle(dotPosition, 2.5, dotPaint);
-        
-        final dotGlowPaint = Paint()
-          ..color = color.withOpacity( 0.5)
-          ..style = PaintingStyle.fill
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-        canvas.drawCircle(dotPosition, 4, dotGlowPaint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_BorderLoadingPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
-}
-
 class ScheduleService {
   static List<DailySchedule> fetchSchedule() {
     final now = DateTime.now();
@@ -1296,21 +1225,45 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      debugPrint('EVENT: powerapps_launch_confirmed | source: button | timestamp: ${DateTime.now()}');
-                      await _launchPowerApps(deepLink: deepLink);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF742774),
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: const Text(
-                      'Открыть',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                  // MIKE: offer open/install actions without explicit close button
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          debugPrint('EVENT: powerapps_launch_confirmed | source: button | timestamp: ${DateTime.now()}');
+                          await _launchPowerApps(deepLink: deepLink);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF742774),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text(
+                          'Открыть',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          debugPrint('EVENT: powerapps_install_redirect | timestamp: ${DateTime.now()}');
+                          await _openStoreForPowerApps();
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF742774),
+                          side: const BorderSide(color: Color(0xFF742774), width: 1.5),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text(
+                          'Установить',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1334,11 +1287,18 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     debugPrint('EVENT: powerapps_launch_attempt | deepLink: $deepLink | timestamp: ${DateTime.now()}');
 
     try {
-      final packageUrl = Uri.parse('com.microsoft.msapps://open');
-      if (await canLaunchUrl(packageUrl)) {
-        await launchUrl(packageUrl, mode: LaunchMode.externalApplication);
-        debugPrint('PowerApps launched via package URL');
-        return;
+      final schemes = <Uri>[
+        Uri.parse('com.microsoft.powerapps://'),
+        Uri.parse('ms-powerapps://'),
+        Uri.parse('com.microsoft.msapps://open'),
+      ];
+
+      for (final scheme in schemes) {
+        if (await canLaunchUrl(scheme)) {
+          await launchUrl(scheme, mode: LaunchMode.externalApplication);
+          debugPrint('PowerApps launched via scheme: ${scheme.scheme}');
+          return;
+        }
       }
 
       if (deepLink.isNotEmpty) {
@@ -1350,30 +1310,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
         }
       }
 
-      final webUrl = Uri.parse('https://make.powerapps.com/');
-      if (await canLaunchUrl(webUrl)) {
-        await launchUrl(webUrl, mode: LaunchMode.externalApplication);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Приложение не найдено. Открыта веб-версия'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-        debugPrint('PowerApps fallback to web version');
-        return;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('PowerApps не установлен. Установите из Google Play'),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(label: 'OK', onPressed: () {}),
-          ),
-        );
-      }
+      await _openStoreForPowerApps(); // MIKE: fall back to store redirect when app/deep link unavailable
     } catch (e) {
       debugPrint('Error launching PowerApps: $e');
       if (mounted) {
@@ -1386,78 +1323,25 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
       }
     }
   }
-  
-  void _showPowerAppsDialogOld() {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity( 0.6),
-      builder: (context) => GestureDetector(
-        onTap: () => Navigator.pop(context),
-        child: Material(
-          color: Colors.transparent,
-          child: Center(
-            child: GestureDetector(
-              onTap: () {},
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity( 0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ПУНКТ 20: Крестик удалён, закрытие по тапу на фон
-                    InkWell(
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        debugPrint('PowerApps открывается...');
-                      },
-                      borderRadius: BorderRadius.circular(25),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(25),
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFF742774),
-                              Color(0xFFD946A0),
-                            ],
-                          ),
-                        ),
-                        child: const Text(
-                          'Открыть',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
+  Future<void> _openStoreForPowerApps() async {
+    final Uri storeUri = Theme.of(context).platform == TargetPlatform.iOS
+        ? Uri.parse('https://apps.apple.com/app/microsoft-power-apps/id1047318566')
+        : Uri.parse('https://play.google.com/store/apps/details?id=com.microsoft.msapps');
+
+    if (await canLaunchUrl(storeUri)) {
+      await launchUrl(storeUri, mode: LaunchMode.externalApplication);
+      debugPrint('PowerApps store redirect launched');
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось открыть магазин для PowerApps'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+  
   void _showMonthPickerDialog() {
     debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
     final activeColor = const Color(0xFF409187);
@@ -3246,6 +3130,7 @@ Widget _buildModeSwitcher(Color activeColor) {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
+      clipBehavior: Clip.hardEdge, // MIKE: avoid divider lines between bandana and body
       child: Container(
         height: MediaQuery.of(context).size.height * 0.65,
         padding: const EdgeInsets.all(12),
@@ -3533,8 +3418,7 @@ class LessonTile extends StatefulWidget {
 class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  late AnimationController _borderController;
-  bool _isLoading = false;
+  bool _borderLoading = false;
   bool _isPressedTitle = false;
   Timer? _longPressTimer;
 
@@ -3550,16 +3434,6 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
       CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
     );
     
-    _borderController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-    _borderController.addListener(() {
-      if (_isLoading && mounted) {
-        setState(() {});
-      }
-    });
-
     if (widget.shouldPulse && widget.examNote != null) {
       _startPulseWithVibration();
     }
@@ -3592,7 +3466,6 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
   void dispose() {
     _longPressTimer?.cancel();
     _pulseController.dispose();
-    _borderController.dispose();
     super.dispose();
   }
 
@@ -3990,13 +3863,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                   onTap: () {
                     // Простое нажатие - запускаем анимацию
                     setState(() {
-                      _isLoading = !_isLoading;
-                      if (_isLoading) {
-                        _borderController.repeat();
-                      } else {
-                        _borderController.stop();
-                        _borderController.reset();
-                      }
+                      _borderLoading = !_borderLoading;
                       debugPrint('EVENT: lesson_title_tap | lesson: ${widget.title} | timestamp: ${DateTime.now()}');
                     });
                   },
@@ -4013,11 +3880,10 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                     scale: _isPressedTitle ? 0.95 : 1.0,
                     duration: const Duration(milliseconds: 150),
                     curve: Curves.easeOut,
-                    child: CustomPaint(
-                      painter: _isLoading ? _BorderLoadingPainter(
-                        progress: _borderController.value,
-                        color: typeColor,
-                      ) : null,
+                    child: BorderLoaderWidget(
+                      active: _borderLoading,
+                      style: BorderLoaderStyle.unidirectional,
+                      color: typeColor,
                       child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                       decoration: BoxDecoration(
@@ -4038,7 +3904,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                           const SizedBox(width: 8),
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 200),
-                            child: _isLoading
+                            child: _borderLoading
                                 ? const SizedBox(
                                     key: ValueKey('loading'),
                                     width: 20,
@@ -4685,66 +4551,83 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            
-            // Ряд 3: Горизонтальный прогресс бар (динамический, меняется при переключении)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
-                child: LinearProgressIndicator(
-                  key: ValueKey(_showElapsed),
-                  value: _showElapsed ? _progress : (1.0 - _progress),
-                  minHeight: 12,
-                  backgroundColor: widget.color.withOpacity( 0.2),
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    _showElapsed ? widget.color : widget.color.withOpacity( 0.6)
+
+            SizedBox(
+              height: 140,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // MIKE: highlight elapsed vs remaining segments without resizing dialog
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final maxWidth = constraints.maxWidth;
+                      final clamped = _progress.clamp(0.0, 1.0);
+                      final fillWidth = (_showElapsed ? clamped : (1 - clamped)) * maxWidth;
+
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          height: 12,
+                          color: widget.color.withOpacity(0.18),
+                          child: Align(
+                            alignment: _showElapsed ? Alignment.centerLeft : Alignment.centerRight,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOutCubic,
+                              width: fillWidth.clamp(0.0, maxWidth).toDouble(),
+                              decoration: BoxDecoration(
+                                color: _showElapsed ? widget.color : widget.color.withOpacity(0.65),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            
-            // Ряд 4: Время (переключаемое) - ЧАС:МИНУТА:СЕКУНДА С АНИМАЦИЕЙ
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  _showElapsed = !_showElapsed;
-                  _updateDuration();
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                decoration: BoxDecoration(
-                  color: widget.color.withOpacity( 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: widget.color, width: 2),
-                ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
-                  child: Text(
-                    _showElapsed
-                        ? _formatDuration(_currentDuration)
-                        : '-${_formatDuration(_currentDuration)}',
-                    key: ValueKey(_showElapsed),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: widget.color,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  const SizedBox(height: 20),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _showElapsed = !_showElapsed;
+                        _updateDuration();
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: widget.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: widget.color, width: 2),
+                      ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+                        child: Text(
+                          _showElapsed
+                              ? _formatDuration(_currentDuration)
+                              : '-${_formatDuration(_currentDuration)}',
+                          key: ValueKey(_showElapsed),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: widget.color,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _showElapsed ? 'Прошло времени' : 'Осталось времени',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade600,
+                  const SizedBox(height: 8),
+                  Text(
+                    _showElapsed ? 'Прошло времени' : 'Осталось времени',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -5194,8 +5077,9 @@ class BorderLoaderWidget extends StatefulWidget {
   State<BorderLoaderWidget> createState() => _BorderLoaderWidgetState();
 }
 
-class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
 
   @override
   void initState() {
@@ -5203,12 +5087,19 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
-    );
-    if (widget.active) _controller.repeat();
+    )..addListener(() {
+        if (widget.active && mounted) {
+          setState(() {});
+        }
+      });
+
+    if (widget.active) {
+      _controller.repeat();
+    }
   }
 
   @override
-  void didUpdateWidget(BorderLoaderWidget oldWidget) {
+  void didUpdateWidget(covariant BorderLoaderWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !_controller.isAnimating) {
       _controller.repeat();
@@ -5226,29 +5117,34 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return CustomPaint(
-          foregroundPainter: _getBorderPainter(),
-          child: child,
-        );
-      },
+    final painter = _resolvePainter(
+      widget.style,
+      widget.color,
+      widget.active ? _controller.value : 0,
+      widget.active,
+    );
+
+    // MIKE: reuse reusable border loader painter stack for lesson title highlight
+    return CustomPaint(
+      foregroundPainter: painter,
       child: widget.child,
     );
   }
 
-  CustomPainter _getBorderPainter() {
-    final bool isHighlighted = widget.isCurrentDay; // Используем существующее свойство
-    final Color borderColor = Colors.green; // Фиксированный цвет
-    
-    // Возвращаем стандартный painter, так как другие стили не используются в WeekCollapsible
-    return BorderLoaderPainterA(
-      progress: isHighlighted ? _controller.value : 0.0,
-      color: borderColor,
-    );
-  }
+  CustomPainter? _resolvePainter(
+    BorderLoaderStyle style,
+    Color color,
+    double progress,
+    bool active,
+  ) {
+    if (!active) return null;
+    switch (style) {
+      case BorderLoaderStyle.unidirectional:
+        return BorderLoaderPainterA(progress: progress, color: color);
+      case BorderLoaderStyle.bidirectional:
+        return BorderLoaderPainterB(progress: progress, color: color);
+      case BorderLoaderStyle.marching:
+        return BorderLoaderPainterC(progress: progress, color: color);
+    }
   }
 }
-
-// Painter классы вынесены в widgets/border_painters.dart

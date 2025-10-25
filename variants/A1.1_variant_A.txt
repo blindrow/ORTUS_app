@@ -1,0 +1,467 @@
+// Variant A — Smooth cascaded animation approach
+// Files: lib/schedule_page.dart (apply patch below)
+
+--- a/lib/schedule_page.dart
++++ b/lib/schedule_page.dart
+@@
+-  return Card(
+-    elevation: 4,
+-    shape: RoundedRectangleBorder(
+-      borderRadius: BorderRadius.circular(16),
+-      side: const BorderSide(color: Colors.black12, width: 0.6),
+-    ),
+-    child: Container(
++  return Card(
++    elevation: 4,
++    shape: RoundedRectangleBorder(
++      borderRadius: BorderRadius.circular(16),
++      // MIKE: remove divider frame so bandana joins body seamlessly
++    ),
++    clipBehavior: Clip.hardEdge,
++    child: Container(
+@@
+-    Positioned(
+-      left: 12,
+-      top: 0,
+-      bottom: 0,
+-      child: _LessonTypeBadge(
+-        color: typeColor,
+-        label: formatText,
+-        onTap: () => _showLessonTypeBottomSheet(context, typeColor),
+-      ),
+-    ),
++    Positioned(
++      left: 0,
++      top: 0,
++      bottom: 0,
++      child: _LessonTypeBadge(
++        color: typeColor,
++        label: formatText,
++        padding: const EdgeInsets.only(left: 0, right: 8, top: 6, bottom: 6),
++        onTap: () => _showLessonTypeBottomSheet(context, typeColor),
++      ),
++    ),
+@@
+-    Positioned(
+-      right: 12,
+-      top: 0,
+-      bottom: 0,
+-      child: _LessonActionTray(
+-        isToday: widget.isToday,
+-        deepLink: widget.deepLink,
+-        onPowerAppsPressed: widget.onPowerAppsPressed,
+-      ),
+-    ),
++    Positioned(
++      right: 12,
++      top: 0,
++      bottom: 0,
++      child: _LessonActionTray(
++        isToday: widget.isToday,
++        deepLink: widget.deepLink,
++        onPowerAppsPressed: widget.onPowerAppsPressed,
++      ),
++    ),
+@@
+-void _showLessonTypeBottomSheet(BuildContext context, Color typeColor) {
+-  showModalBottomSheet(
+-    context: context,
+-    backgroundColor: Colors.transparent,
+-    isScrollControlled: true,
+-    builder: (context) => _LessonTypeBottomSheet(color: typeColor),
+-  );
+-}
++void _showLessonTypeBottomSheet(BuildContext context, Color typeColor) {
++  showModalBottomSheet(
++    context: context,
++    backgroundColor: Colors.transparent,
++    isScrollControlled: true,
++    builder: (context) => _LessonTypeBottomSheet(
++      color: typeColor,
++      showCloseButton: false, // MIKE: dismiss by swipe/outside
++    ),
++  );
++}
+@@
+-class WeekCollapsible extends StatefulWidget {
+-  final Widget header;
+-  final List<Widget> children;
+-  final bool initiallyExpanded;
+-  final ValueChanged<bool>? onExpansionChanged;
+-  final GlobalKey? collapsibleKey;
+-  final bool isCurrentDay;
+-
+-  const WeekCollapsible({
+-    required this.header,
+-    required this.children,
+-    this.initiallyExpanded = false,
+-    this.onExpansionChanged,
+-    this.collapsibleKey,
+-    this.isCurrentDay = false,
+-    super.key,
+-  });
+-
+-  @override
+-  State<WeekCollapsible> createState() => _WeekCollapsibleState();
+-}
+-
+-class _WeekCollapsibleState extends State<WeekCollapsible>
+-    with SingleTickerProviderStateMixin {
+-  late AnimationController _controller;
+-  late Animation<double> _curve;
+-  bool _expanded = false;
+-
+-  @override
+-  void initState() {
+-    super.initState();
+-    _expanded = widget.initiallyExpanded;
+-    _controller = AnimationController(
+-      vsync: this,
+-      duration: const Duration(milliseconds: 1000),
+-    );
+-    _curve = CurvedAnimation(
+-      parent: _controller,
+-      curve: Curves.easeInOutCubic,
+-    );
+-    if (_expanded) {
+-      _controller.value = 1;
+-    }
+-  }
+-
+-  @override
+-  void dispose() {
+-    _controller.dispose();
+-    super.dispose();
+-  }
+-
+-  Future<void> _toggle() async {
+-    final target = !_expanded;
+-    setState(() => _expanded = target);
+-    if (target) {
+-      await _controller.forward();
+-    } else {
+-      await _controller.reverse();
+-    }
+-    widget.onExpansionChanged?.call(_expanded);
+-  }
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final borderColor = widget.isCurrentDay
+-        ? const Color(0xFF409187)
+-        : Colors.grey.shade300;
+-    final borderWidth = widget.isCurrentDay ? 2.0 : 1.0;
+-    final bgColor = widget.isCurrentDay
+-        ? Color.lerp(const Color(0xFFDFF6EE), const Color(0xFF2E8B57), _curve.value)!
+-        : Colors.white;
+-
+-    return Container(
+-      key: widget.collapsibleKey,
+-      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+-      decoration: BoxDecoration(
+-        color: bgColor,
+-        borderRadius: BorderRadius.circular(12),
+-        border: Border.all(color: borderColor, width: borderWidth),
+-        boxShadow: const [
+-          BoxShadow(
+-            color: Colors.black12,
+-            blurRadius: 6,
+-            offset: Offset(0, 2),
+-          ),
+-        ],
+-      ),
+-      clipBehavior: Clip.hardEdge,
+-      child: Column(
+-        children: [
+-          InkWell(onTap: _toggle, child: widget.header),
+-          SizeTransition(
+-            sizeFactor: _curve,
+-            axisAlignment: -1,
+-            child: Column(
+-              children: [
+-                ...widget.children,
+-                if (_expanded)
+-                  Padding(
+-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+-                    child: Align(
+-                      alignment: Alignment.center,
+-                      child: _CollapseButton(onTap: _toggle),
+-                    ),
+-                  ),
+-              ],
+-            ),
+-          ),
+-        ],
+-      ),
+-    );
+-  }
+-}
++class WeekCollapsible extends StatefulWidget {
++  final Widget header;
++  final List<Widget> children;
++  final bool initiallyExpanded;
++  final ValueChanged<bool>? onExpansionChanged;
++  final GlobalKey? collapsibleKey;
++  final bool isCurrentDay;
++
++  const WeekCollapsible({
++    required this.header,
++    required this.children,
++    this.initiallyExpanded = false,
++    this.onExpansionChanged,
++    this.collapsibleKey,
++    this.isCurrentDay = false,
++    super.key,
++  });
++
++  @override
++  State<WeekCollapsible> createState() => _WeekCollapsibleState();
++}
++
++class _WeekCollapsibleState extends State<WeekCollapsible>
++    with SingleTickerProviderStateMixin {
++  late final AnimationController _controller;
++  late final Animation<double> _height;
++  bool _expanded = false;
++
++  @override
++  void initState() {
++    super.initState();
++    _expanded = widget.initiallyExpanded;
++    _controller = AnimationController(
++      vsync: this,
++      duration: const Duration(milliseconds: 1000),
++    );
++    _height = CurvedAnimation(
++      parent: _controller,
++      curve: Curves.easeInOutCubic,
++    );
++    if (_expanded) {
++      _controller.value = 1;
++    }
++  }
++
++  @override
++  void dispose() {
++    _controller.dispose();
++    super.dispose();
++  }
++
++  Future<void> _toggle() async {
++    final opening = !_expanded;
++    setState(() => _expanded = opening);
++    if (opening) {
++      await _controller.forward();
++    } else {
++      await _controller.reverse();
++    }
++    widget.onExpansionChanged?.call(_expanded);
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final borderColor = widget.isCurrentDay
++        ? const Color(0xFF409187)
++        : Colors.grey.shade300;
++    final borderWidth = widget.isCurrentDay ? 2.0 : 1.0;
++    final bgColor = widget.isCurrentDay
++        ? Color.lerp(
++            const Color(0xFFDFF6EE),
++            const Color(0xFF2E8B57),
++            _height.value,
++          )!
++        : Colors.white;
++
++    return AnimatedBuilder(
++      animation: _height,
++      builder: (context, child) {
++        return Container(
++          key: widget.collapsibleKey,
++          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
++          decoration: BoxDecoration(
++            color: bgColor,
++            borderRadius: BorderRadius.circular(12),
++            border: Border.all(color: borderColor, width: borderWidth),
++            boxShadow: const [
++              BoxShadow(
++                color: Colors.black12,
++                blurRadius: 6,
++                offset: Offset(0, 2),
++              ),
++            ],
++          ),
++          clipBehavior: Clip.hardEdge,
++          child: Column(
++            children: [
++              InkWell(onTap: _toggle, child: widget.header),
++              SizeTransition(
++                sizeFactor: _height,
++                axisAlignment: -1,
++                child: Column(
++                  children: [
++                    ...widget.children,
++                    if (_expanded)
++                      Padding(
++                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
++                        child: Align(
++                          alignment: Alignment.center,
++                          child: _CollapseButton(onTap: _toggle),
++                        ),
++                      ),
++                  ],
++                ),
++              ),
++            ],
++          ),
++        );
++      },
++    );
++  }
++}
+@@
+-  Widget _buildWeekScheduleList() {
++  Widget _buildWeekScheduleList() {
+@@
+-            Container(
+-              width: 32,
+-              height: 32,
+-              decoration: BoxDecoration(
+-                color: isToday
+-                    ? const Color(0xFF409187).withOpacity(0.18)
+-                    : Colors.transparent,
+-                borderRadius: BorderRadius.circular(16),
+-                border: Border.all(
+-                  color: isToday
+-                      ? const Color(0xFF409187)
+-                      : Colors.grey.shade300,
+-                  width: 2,
+-                ),
+-              ),
+-              child: Center(
+-                child: Text(
+-                  '${daily.lessons.length}',
+-                  style: TextStyle(
+-                    fontWeight: FontWeight.bold,
+-                    color: isToday
+-                        ? const Color(0xFF409187)
+-                        : Colors.grey.shade600,
+-                  ),
+-                ),
+-              ),
+-            ),
++            const SizedBox(width: 32),
+@@
+-  void _showPowerAppsDialog(String deepLink) {
+-    if (deepLink.isEmpty) {
+-      _launchPowerApps();
+-      return;
+-    }
+-
+-    showGeneralDialog(
+-      context: context,
+-      barrierDismissible: true,
+-      barrierLabel: 'PowerApps',
+-      barrierColor: Colors.black54,
+-      transitionDuration: const Duration(milliseconds: 250),
+-      pageBuilder: (context, anim1, anim2) {
+-        return Center(
+-          child: _PowerAppsDialog(
+-            deepLink: deepLink,
+-            onLaunch: () => _launchPowerApps(deepLink: deepLink),
+-          ),
+-        );
+-      },
+-      transitionBuilder: (context, anim1, anim2, child) {
+-        return FadeTransition(
+-          opacity: anim1,
+-          child: ScaleTransition(
+-            scale: CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+-            child: child,
+-          ),
+-        );
+-      },
+-    );
+-  }
++  void _showPowerAppsDialog(String deepLink) {
++    showGeneralDialog(
++      context: context,
++      barrierDismissible: true,
++      barrierLabel: 'PowerApps',
++      barrierColor: Colors.black54,
++      transitionDuration: const Duration(milliseconds: 300),
++      pageBuilder: (context, _, __) {
++        return Center(
++          child: _PowerAppsDialog(
++            deepLink: deepLink,
++            onLaunch: () => _launchPowerApps(deepLink: deepLink),
++            onInstall: _openStoreForPowerApps,
++          ),
++        );
++      },
++      transitionBuilder: (context, anim, _, child) {
++        return FadeTransition(
++          opacity: anim,
++          child: ScaleTransition(
++            scale: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
++            child: child,
++          ),
++        );
++      },
++    );
++  }
+@@
+-  void _launchPowerApps({String deepLink = ''}) async {
++  void _launchPowerApps({String deepLink = ''}) async {
+@@
+-      final Uri scheme = Uri.parse('com.microsoft.msapps://open');
+-      if (await canLaunchUrl(scheme)) {
+-        await launchUrl(scheme, mode: LaunchMode.externalApplication);
+-        return;
+-      }
+-      if (deepLink.isNotEmpty) {
+-        final Uri deep = Uri.parse(deepLink);
+-        if (await canLaunchUrl(deep)) {
+-          await launchUrl(deep, mode: LaunchMode.externalApplication);
+-          return;
+-        }
+-      }
+-      final Uri fallback = Uri.parse('https://make.powerapps.com/');
+-      if (await canLaunchUrl(fallback)) {
+-        await launchUrl(fallback, mode: LaunchMode.externalApplication);
+-        if (mounted) {
+-          ScaffoldMessenger.of(context).showSnackBar(
+-            const SnackBar(
+-              content: Text('Приложение не найдено. Открыта веб-версия'),
+-            ),
+-          );
+-        }
+-        return;
+-      }
++      final candidateSchemes = <Uri>[
++        Uri.parse('com.microsoft.powerapps://'),
++        Uri.parse('ms-powerapps://'),
++        Uri.parse('com.microsoft.msapps://open'),
++      ];
++      for (final scheme in candidateSchemes) {
++        if (await canLaunchUrl(scheme)) {
++          await launchUrl(scheme, mode: LaunchMode.externalApplication);
++          return;
++        }
++      }
++      if (deepLink.isNotEmpty) {
++        final Uri deep = Uri.parse(deepLink);
++        if (await canLaunchUrl(deep)) {
++          await launchUrl(deep, mode: LaunchMode.externalApplication);
++          return;
++        }
++      }
++      await _openStoreForPowerApps();
+@@
++  Future<void> _openStoreForPowerApps() async {
++    final Uri storeUri = Theme.of(context).platform == TargetPlatform.iOS
++        ? Uri.parse('https://apps.apple.com/app/microsoft-power-apps/id1047318566')
++        : Uri.parse('https://play.google.com/store/apps/details?id=com.microsoft.msapps');
++    if (await canLaunchUrl(storeUri)) {
++      await launchUrl(storeUri, mode: LaunchMode.externalApplication);
++    }
++  }
