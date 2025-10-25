@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:table_calendar/table_calendar.dart'; 
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1223,10 +1224,19 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                       child: const Icon(Icons.apps, color: Colors.white, size: 36),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Открыть PowerApps',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 20),
+                // Текст
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Открыть Power Apps?',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
                   // MIKE: offer open/install actions without explicit close button
@@ -1269,8 +1279,8 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -1326,8 +1336,13 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
             content: Text('Ошибка: $e'),
             duration: const Duration(seconds: 3),
           ),
-        );
-      }
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFE67E22),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+        ),
+      );
     }
   }
 
@@ -1354,7 +1369,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     final DateTime now = DateTime.now();
     int displayYear = _monthViewDate.year;
 
-    showDialog(
+    showGeneralDialog(
       context: context,
       barrierDismissible: true,
       barrierColor: Colors.black.withOpacity(0.6),
@@ -1450,15 +1465,63 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                                 ),
                               ),
                             ),
+                            itemCount: 12,
+                            itemBuilder: (context, index) {
+                              final month = index + 1;
+                              final isCurrentMonth = month == now.month && selectedYear == now.year;
+                              final isSelected = month == selectedMonth && selectedYear == _monthViewDate.year;
+                              final isCurrentYear = selectedYear == now.year;
+                              
+                              return InkWell(
+                                onTap: () {
+                                  setDialogState(() {
+                                    selectedMonth = month;
+                                  });
+                                  setState(() {
+                                    _monthViewDate = DateTime(selectedYear, month, 1);
+                                  });
+                                  Navigator.pop(context);
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeInOutCubic,
+                                  decoration: BoxDecoration(
+                                    color: isCurrentMonth 
+                                        ? const Color(0xFF409187)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isSelected 
+                                          ? const Color(0xFF409187)
+                                          : (isCurrentYear ? const Color(0xFF409187).withOpacity( 0.3) : Colors.grey.shade300),
+                                      width: isSelected ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      DateFormat('MMM', 'ru').format(DateTime(2024, month)),
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: isSelected || isCurrentMonth ? FontWeight.bold : FontWeight.normal,
+                                        color: isCurrentMonth 
+                                            ? Colors.white
+                                            : (isCurrentYear ? const Color(0xFF409187) : Colors.grey.shade600),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      }),
+                        ],
+                      ),
                     ),
-                  ],
+                  ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -3223,6 +3286,7 @@ Widget _buildModeSwitcher(Color activeColor) {
       children: weekSchedule.map((dailySchedule) {
         final normalizedDate = _normalizeDate(dailySchedule.date);
         final isToday = normalizedDate == today;
+        final lessonCount = dailySchedule.lessons.length;
         final tileKeyStr = '${dailySchedule.date}';
         final globalKey = _tileKeys.putIfAbsent(tileKeyStr, () => GlobalKey());
 
@@ -4805,8 +4869,116 @@ class _CircleProgressPainter extends CustomPainter {
   }
 }
 
+// Динамический таймер для вкладки Неделя
+class _WeekDayTimerWidget extends StatefulWidget {
+  final DailySchedule dailySchedule;
+  final Color activeColor;
+  final int lessonCount;
+
+  const _WeekDayTimerWidget({
+    required this.dailySchedule,
+    required this.activeColor,
+    required this.lessonCount,
+  });
+
+  @override
+  State<_WeekDayTimerWidget> createState() => _WeekDayTimerWidgetState();
+}
+
+class _WeekDayTimerWidgetState extends State<_WeekDayTimerWidget> {
+  Timer? _timer;
+  double _progress = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateProgress();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _updateProgress();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _updateProgress() {
+    if (widget.dailySchedule.lessons.isEmpty) return;
+    
+    final now = DateTime.now();
+    double newProgress = 0.0;
+
+    try {
+      // Получаем время первого и последнего урока
+      final firstLesson = widget.dailySchedule.lessons.first;
+      final lastLesson = widget.dailySchedule.lessons.last;
+      
+      final firstTimes = firstLesson.time.split(' - ');
+      final lastTimes = lastLesson.time.split(' - ');
+      
+      if (firstTimes.isNotEmpty && lastTimes.length == 2) {
+        final startParts = firstTimes[0].split(':');
+        final endParts = lastTimes[1].split(':');
+        
+        if (startParts.length == 2 && endParts.length == 2) {
+          final dayStart = DateTime(now.year, now.month, now.day, int.parse(startParts[0]), int.parse(startParts[1]));
+          final dayEnd = DateTime(now.year, now.month, now.day, int.parse(endParts[0]), int.parse(endParts[1]));
+          
+          if (now.isBefore(dayStart)) {
+            newProgress = 0.0;
+          } else if (now.isAfter(dayEnd)) {
+            newProgress = 1.0;
+          } else {
+            final elapsed = now.difference(dayStart).inSeconds.toDouble();
+            final total = dayEnd.difference(dayStart).inSeconds.toDouble();
+            newProgress = (elapsed / total).clamp(0.0, 1.0);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error calculating day progress: $e');
+    }
+
+    if (mounted && _progress != newProgress) {
+      setState(() {
+        _progress = newProgress;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: CustomPaint(
+        painter: _CircleProgressPainter(
+          progress: _progress,
+          progressColor: widget.activeColor,
+          bgColor: widget.activeColor.withOpacity( 0.3),
+          strokeWidth: 2.0,
+        ),
+        child: Center(
+          child: Text(
+            '${widget.lessonCount}',
+            style: TextStyle(
+              color: widget.activeColor,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ============================================================================
-// ПУНКТ 1: WeekCollapsible - Плавная анимация сворачивания/раскрытия (1000ms)
+// ПУНКТ 1: WeekCollapsible - Плавная анимация сворачивания/раскрытия (700ms)
 // ============================================================================
 class WeekCollapsible extends StatefulWidget {
   final Widget header;
@@ -4870,13 +5042,15 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
     debugPrint('ANIMATION: start | widget: WeekCollapsible | expanded: ${!_expanded} | timestamp: ${DateTime.now()}');
     
     if (!_expanded) {
+      // ПУНКТ 6: Вибрация при раскрытии
+      HapticFeedback.lightImpact();
       setState(() => _expanded = true);
       await _controller.forward(from: _controller.value);
-      debugPrint('ANIMATION: expand_complete | duration: 1000ms');
+      debugPrint('ANIMATION: expand_complete | duration: 700ms');
     } else {
       await _controller.reverse(from: _controller.value);
       setState(() => _expanded = false);
-      debugPrint('ANIMATION: collapse_complete | duration: 1000ms');
+      debugPrint('ANIMATION: collapse_complete | duration: 700ms');
     }
     
     setState(() => _isAnimating = false);
