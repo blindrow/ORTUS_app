@@ -4935,26 +4935,26 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
                     children: [
                       // Staggered контент
                       ...widget.children,
-                // Кнопка сворачивания внизу
-                if (_expanded)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Center(
-                      child: InkWell(
-                        onTap: _toggle,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF409187).withOpacity( 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFF409187), width: 1),
-                          ),
-                          child: const Icon(
-                            Icons.keyboard_arrow_up,
-                            color: Color(0xFF409187),
-                            size: 20,
-                          ),
+                      // Кнопка сворачивания внизу
+                      if (_expanded)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Center(
+                            child: InkWell(
+                              onTap: _toggle,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF409187).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF409187), width: 1),
+                                ),
+                                child: const Icon(
+                                  Icons.keyboard_arrow_up,
+                                  color: Color(0xFF409187),
+                                  size: 20,
+                                ),
                         ),
                       ),
                     ),
