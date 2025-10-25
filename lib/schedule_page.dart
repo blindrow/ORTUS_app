@@ -1334,11 +1334,18 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     debugPrint('EVENT: powerapps_launch_attempt | deepLink: $deepLink | timestamp: ${DateTime.now()}');
 
     try {
-      final packageUrl = Uri.parse('com.microsoft.msapps://open');
-      if (await canLaunchUrl(packageUrl)) {
-        await launchUrl(packageUrl, mode: LaunchMode.externalApplication);
-        debugPrint('PowerApps launched via package URL');
-        return;
+      final candidateSchemes = <Uri>[
+        Uri.parse('com.microsoft.powerapps://'),
+        Uri.parse('ms-powerapps://'),
+        Uri.parse('com.microsoft.msapps://open'),
+      ];
+
+      for (final scheme in candidateSchemes) {
+        if (await canLaunchUrl(scheme)) {
+          await launchUrl(scheme, mode: LaunchMode.externalApplication);
+          debugPrint('PowerApps launched via scheme: ${scheme.scheme}');
+          return;
+        }
       }
 
       if (deepLink.isNotEmpty) {
@@ -1351,29 +1358,29 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
       }
 
       final webUrl = Uri.parse('https://make.powerapps.com/');
-      if (await canLaunchUrl(webUrl)) {
-        await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+        if (await canLaunchUrl(webUrl)) {
+          await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Приложение не найдено. Открыта веб-версия'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          debugPrint('PowerApps fallback to web version');
+          return;
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Приложение не найдено. Открыта веб-версия'),
-              duration: Duration(seconds: 3),
+            SnackBar(
+              content: const Text('PowerApps не установлен. Установите из Google Play'),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(label: 'OK', onPressed: () {}),
             ),
           );
         }
-        debugPrint('PowerApps fallback to web version');
-        return;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('PowerApps не установлен. Установите из Google Play'),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(label: 'OK', onPressed: () {}),
-          ),
-        );
-      }
     } catch (e) {
       debugPrint('Error launching PowerApps: $e');
       if (mounted) {
@@ -5194,8 +5201,9 @@ class BorderLoaderWidget extends StatefulWidget {
   State<BorderLoaderWidget> createState() => _BorderLoaderWidgetState();
 }
 
-class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
 
   @override
   void initState() {
@@ -5203,12 +5211,18 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
-    );
-    if (widget.active) _controller.repeat();
+    )..addListener(() {
+        if (widget.active && mounted) {
+          setState(() {});
+        }
+      });
+    if (widget.active) {
+      _controller.repeat();
+    }
   }
 
   @override
-  void didUpdateWidget(BorderLoaderWidget oldWidget) {
+  void didUpdateWidget(covariant BorderLoaderWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !_controller.isAnimating) {
       _controller.repeat();
@@ -5226,28 +5240,32 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return CustomPaint(
-          foregroundPainter: _getBorderPainter(),
-          child: child,
-        );
-      },
+    return CustomPaint(
+      foregroundPainter: _resolvePainter(
+        widget.style,
+        widget.color,
+        _controller.value,
+        widget.active,
+      ),
       child: widget.child,
     );
   }
 
-  CustomPainter _getBorderPainter() {
-    final bool isHighlighted = widget.isCurrentDay; // Используем существующее свойство
-    final Color borderColor = Colors.green; // Фиксированный цвет
-    
-    // Возвращаем стандартный painter, так как другие стили не используются в WeekCollapsible
-    return BorderLoaderPainterA(
-      progress: isHighlighted ? _controller.value : 0.0,
-      color: borderColor,
-    );
-  }
+  CustomPainter? _resolvePainter(
+    BorderLoaderStyle style,
+    Color color,
+    double progress,
+    bool active,
+  ) {
+    if (!active) return null;
+    switch (style) {
+      case BorderLoaderStyle.unidirectional:
+        return BorderLoaderPainterA(progress: progress, color: color);
+      case BorderLoaderStyle.bidirectional:
+        return BorderLoaderPainterB(progress: progress, color: color);
+      case BorderLoaderStyle.marching:
+        return BorderLoaderPainterC(progress: progress, color: color);
+    }
   }
 }
 
