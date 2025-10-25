@@ -7,7 +7,6 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui';
 import 'widgets/border_painters.dart';
-import 'widgets/border_loader_button.dart';
 
 enum LessonType { regular, online, exam, changed }
 enum LessonFormat { lecture, practice, lab }
@@ -606,6 +605,8 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
   late DateTime _currentWeekDate; // Для Week view (отдельная навигация)
   late DateTime _monthViewDate; // Для Month view (отдельная навигация)
   DateTime? _selectedDay; // Nullable для правильного отображения при первом открытии
+  DateTime? _previousSelectedDay; // ПУНКТ 22: Для анимации перемещения highlight
+  late DateTime _focusedDay;
   late List<DailySchedule> fullSchedule;
   ScheduleViewMode _viewMode = ScheduleViewMode.week;
   ScheduleViewMode _previousViewMode = ScheduleViewMode.week;
@@ -657,12 +658,12 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
   void initState() {
     super.initState();
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    _currentDate = today;
-    _currentWeekDate = today; // Отдельная дата для Week view
-    _monthViewDate = today; // Отдельная дата для Month view
+    _currentDate = DateTime(now.year, now.month, now.day);
+    _currentWeekDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Week view
+    _monthViewDate = DateTime(now.year, now.month, now.day); // Отдельная дата для Month view
+    _focusedDay = _currentDate;
+    _selectedDay = _currentDate; // MIKE: выделяем сегодняшний день сразу при запуске вкладки "Месяц"
     fullSchedule = ScheduleService.fetchSchedule();
-    _selectedDay = today;
     
     // Initialize drag oval animation controller
     _ovalSnapController = AnimationController(
@@ -1175,48 +1176,51 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     );
   }
 
-  void _showPowerAppsDialog([String deepLink = '']) {
+  Future<void> _showPowerAppsDialog(String deepLink) async {
+    // MIKE: подтверждаем запуск PowerApps через единый диалог с вариантами Open/Install
     debugPrint('EVENT: powerapps_dialog_open | timestamp: ${DateTime.now()}');
 
-    showGeneralDialog(
+    final result = await showGeneralDialog<String>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'Open PowerApps',
+      barrierLabel: 'PowerApps',
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (_, __, ___) {
-        return Center(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 40),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  InkWell(
-                    onTap: () async {
-                      Navigator.pop(context);
-                      debugPrint('EVENT: powerapps_launch_confirmed | source: icon | timestamp: ${DateTime.now()}');
-                      await _launchPowerApps(deepLink: deepLink);
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      width: 60,
-                      height: 60,
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
+            child: Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(16),
                         gradient: const LinearGradient(
                           colors: [Color(0xFF742774), Color(0xFFD946A0)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                       ),
-                      child: const Icon(Icons.apps, color: Colors.white, size: 32),
+                      child: const Icon(Icons.apps, color: Colors.white, size: 36),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1271,20 +1275,21 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
           ),
         );
       },
-      transitionBuilder: (context, anim1, anim2, child) {
-        return FadeTransition(
-          opacity: anim1,
-          child: ScaleTransition(
-            scale: CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
-            child: child,
-          ),
-        );
-      },
     );
+
+    if (result == 'open') {
+      await _launchPowerApps(deepLink: deepLink);
+    } else if (result == 'install') {
+      await _openStoreForPowerApps();
+    }
   }
-  
+
   Future<void> _launchPowerApps({String deepLink = ''}) async {
-    debugPrint('EVENT: powerapps_launch_attempt | deepLink: $deepLink | timestamp: ${DateTime.now()}');
+    final schemes = <Uri>[
+      Uri.parse('com.microsoft.powerapps://'),
+      Uri.parse('ms-powerapps://'),
+      Uri.parse('com.microsoft.msapps://open'),
+    ];
 
     try {
       final schemes = <Uri>[
@@ -1300,12 +1305,14 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
           return;
         }
       }
+    }
 
-      if (deepLink.isNotEmpty) {
+    if (deepLink.isNotEmpty) {
+      try {
         final uri = Uri.parse(deepLink);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
-          debugPrint('PowerApps launched via deep link: $deepLink');
+          debugPrint('EVENT: powerapps_launch_deeplink | uri: $deepLink');
           return;
         }
       }
@@ -1344,28 +1351,31 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
   
   void _showMonthPickerDialog() {
     debugPrint('EVENT: quickjump_open | screen: month | timestamp: ${DateTime.now()}');
-    final activeColor = const Color(0xFF409187);
+    final DateTime now = DateTime.now();
     int displayYear = _monthViewDate.year;
 
     showDialog(
       context: context,
       barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
       builder: (context) {
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 30),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 32),
           child: StatefulBuilder(
-            builder: (context, setStateDialog) {
-              final currentYear = DateTime.now().year;
-              final currentMonth = DateTime.now().month;
-              final prevYearHasCurrent = currentYear == displayYear - 1;
-              final nextYearHasCurrent = currentYear == displayYear + 1;
-
+            builder: (context, setDialogState) {
               return Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1373,133 +1383,71 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        InkWell(
-                          onTap: () => setStateDialog(() => displayYear--),
-                          borderRadius: BorderRadius.circular(50),
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: prevYearHasCurrent ? activeColor.withOpacity(0.2) : Colors.transparent,
-                              border: Border.all(
-                                color: prevYearHasCurrent ? activeColor : Colors.grey.shade300,
-                                width: 2,
-                              ),
-                            ),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 2),
-                                child: Icon(
-                                  Icons.arrow_back_ios,
-                                  size: 18,
-                                  color: prevYearHasCurrent ? activeColor : Colors.grey.shade600,
-                                ),
-                              ),
-                            ),
-                          ),
+                        IconButton(
+                          onPressed: () => setDialogState(() => displayYear--),
+                          icon: const Icon(Icons.chevron_left, color: Color(0xFF409187)),
                         ),
                         Text(
                           '$displayYear',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.grey.shade600,
-                          ),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
                         ),
-                        InkWell(
-                          onTap: () => setStateDialog(() => displayYear++),
-                          borderRadius: BorderRadius.circular(50),
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: nextYearHasCurrent ? activeColor.withOpacity(0.2) : Colors.transparent,
-                              border: Border.all(
-                                color: nextYearHasCurrent ? activeColor : Colors.grey.shade300,
-                                width: 2,
-                              ),
-                            ),
-                            child: Center(
-                              child: Icon(
-                                Icons.arrow_forward_ios,
-                                size: 18,
-                                color: nextYearHasCurrent ? activeColor : Colors.grey.shade600,
-                              ),
-                            ),
-                          ),
+                        IconButton(
+                          onPressed: () => setDialogState(() => displayYear++),
+                          icon: const Icon(Icons.chevron_right, color: Color(0xFF409187)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
                     Wrap(
-                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 12,
                       children: List.generate(12, (index) {
-                        final month = index + 1;
-                        final bool isCurrentMonthYear =
-                            (displayYear == currentYear && month == currentMonth);
-                        final bool isSelectedMonth =
-                            (displayYear == _monthViewDate.year && month == _monthViewDate.month);
-                        const List<String> monthNames = [
-                          'Янв',
-                          'Фев',
-                          'Мар',
-                          'Апр',
-                          'Май',
-                          'Июн',
-                          'Июл',
-                          'Авг',
-                          'Сен',
-                          'Окт',
-                          'Ноя',
-                          'Дек',
-                        ];
+                        final int month = index + 1;
+                        final bool isCurrentMonth = displayYear == now.year && month == now.month;
+                        final bool isSelectedMonth = displayYear == _monthViewDate.year && month == _monthViewDate.month;
 
-                        Color textColor;
-                        Color borderColor;
-                        Color bgColor;
-
-                        if (isSelectedMonth) {
-                          borderColor = activeColor;
-                          textColor = activeColor;
-                          bgColor = isCurrentMonthYear ? activeColor.withOpacity(0.2) : Colors.transparent;
-                        } else if (isCurrentMonthYear) {
-                          borderColor = Colors.grey.shade400;
-                          textColor = activeColor;
-                          bgColor = activeColor.withOpacity(0.2);
-                        } else {
-                          borderColor = Colors.grey.shade300;
-                          textColor = Colors.black87;
-                          bgColor = Colors.transparent;
-                        }
+                        final Color backgroundColor = isCurrentMonth
+                            ? const Color(0xFF409187).withOpacity(0.15)
+                            : Colors.transparent;
+                        final Color borderColor = isSelectedMonth
+                            ? const Color(0xFF409187)
+                            : (isCurrentMonth
+                                ? const Color(0xFF409187).withOpacity(0.4)
+                                : Colors.grey.shade300);
+                        final Color textColor = isSelectedMonth
+                            ? const Color(0xFF409187)
+                            : (displayYear == now.year
+                                ? const Color(0xFF409187)
+                                : Colors.black87);
 
                         return InkWell(
+                          borderRadius: BorderRadius.circular(10),
                           onTap: () {
-                            final newDate = DateTime(displayYear, month, 1);
+                            final DateTime newDate = DateTime(displayYear, month, 1);
                             setState(() {
                               _monthViewDate = newDate;
+                              _focusedDay = newDate;
                               _currentDate = newDate;
-                              _selectedDay = null;
+                              _selectedDay = newDate;
                             });
-                            Navigator.of(context).pop();
+                            Navigator.pop(context);
                           },
-                          borderRadius: BorderRadius.circular(8),
                           child: Container(
-                            width: 60,
-                            margin: const EdgeInsets.all(4),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            width: 70,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
                             decoration: BoxDecoration(
-                              color: bgColor,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: borderColor, width: 2),
+                              color: backgroundColor,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: borderColor, width: isSelectedMonth ? 2 : 1),
                             ),
-                            child: Text(
-                              monthNames[index],
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
+                            child: Center(
+                              child: Text(
+                                DateFormat('MMM', 'ru').format(DateTime(0, month)),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: isCurrentMonth || isSelectedMonth ? FontWeight.bold : FontWeight.w500,
+                                  color: textColor,
+                                ),
                               ),
                             ),
                           ),
@@ -2319,7 +2267,7 @@ Widget _buildModeSwitcher(Color activeColor) {
         borderRadius: BorderRadius.circular(30),
         onTap: () {
           if (isActive && mode == ScheduleViewMode.month) {
-            _showMonthPickerDialog();
+            _showMonthPickerDialog(); // MIKE: повторный тап по активной вкладке "Месяц" открывает квик-пикер
             return;
           }
           setState(() {
@@ -2822,8 +2770,6 @@ Widget _buildModeSwitcher(Color activeColor) {
   Widget _buildMonthCalendar(BuildContext context) {
     if (fullSchedule.isEmpty) return Container();
 
-    const activeColor = Color(0xFF409187);
-
     return Column(
       children: [
         Row(
@@ -2833,6 +2779,7 @@ Widget _buildModeSwitcher(Color activeColor) {
               onTap: () {
                 setState(() {
                   _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month - 1);
+                  _focusedDay = _monthViewDate;
                 });
               },
               borderRadius: BorderRadius.circular(50),
@@ -2919,6 +2866,7 @@ Widget _buildModeSwitcher(Color activeColor) {
               onTap: () {
                 setState(() {
                   _monthViewDate = DateTime(_monthViewDate.year, _monthViewDate.month + 1);
+                  _focusedDay = _monthViewDate;
                 });
               },
               borderRadius: BorderRadius.circular(50),
@@ -2956,104 +2904,148 @@ Widget _buildModeSwitcher(Color activeColor) {
                 highlightColor: Colors.transparent,
               ),
               child: TableCalendar(
-                locale: 'ru_RU',
-                startingDayOfWeek: StartingDayOfWeek.monday,
-                firstDay: DateTime.utc(2023, 1, 1),
-                lastDay: DateTime.utc(2030, 12, 31),
-                focusedDay: _monthViewDate,
-                calendarFormat: CalendarFormat.month,
-                headerVisible: false,
-                selectedDayPredicate: (day) =>
-                    _selectedDay != null && isSameDay(day, _selectedDay),
-                onDaySelected: (selectedDay, focusedDay) {
-                  if (!isSameDay(_selectedDay, selectedDay)) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _monthViewDate = focusedDay;
-                      _currentDate = selectedDay;
-                    });
-                  }
-                },
-                onPageChanged: (focusedDay) {
-                  setState(() {
-                    _monthViewDate = focusedDay;
-                  });
-                },
-                calendarStyle: CalendarStyle(
-                  todayDecoration: const BoxDecoration(color: Colors.transparent),
-                  todayTextStyle: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: activeColor,
-                  ),
-                  selectedDecoration: const BoxDecoration(color: Colors.transparent),
-                  selectedTextStyle: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: activeColor,
-                  ),
-                  defaultTextStyle: const TextStyle(color: Colors.black87),
-                  weekendTextStyle: const TextStyle(color: Colors.black87),
-                  outsideTextStyle: TextStyle(color: Colors.grey.shade400),
+        locale: 'ru_RU',
+        startingDayOfWeek: StartingDayOfWeek.monday,
+        firstDay: DateTime.utc(2023, 1, 1),
+        lastDay: DateTime.utc(2030, 12, 31),
+        focusedDay: _focusedDay,
+        calendarFormat: CalendarFormat.month,
+        headerVisible: false,
+        selectedDayPredicate: (day) {
+          return _selectedDay != null &&
+                 _selectedDay!.year == day.year &&
+                 _selectedDay!.month == day.month &&
+                 _selectedDay!.day == day.day;
+        },
+        onDaySelected: (selectedDay, focusedDay) {
+          if (_selectedDay == null ||
+              _selectedDay!.year != selectedDay.year ||
+              _selectedDay!.month != selectedDay.month ||
+              _selectedDay!.day != selectedDay.day) {
+            setState(() {
+              _previousSelectedDay = _selectedDay; // ПУНКТ 22: Сохраняем предыдущий
+              _selectedDay = selectedDay;
+              _focusedDay = focusedDay;
+              _currentDate = selectedDay;
+            });
+            debugPrint('EVENT: month_day_selected | day: $selectedDay | previous: $_previousSelectedDay');
+          }
+        },
+        onPageChanged: (focusedDay) {
+          setState(() {
+            _focusedDay = focusedDay;
+            _monthViewDate = focusedDay; // Синхронизация заголовка месяца при скролле
+          });
+        },
+        calendarStyle: CalendarStyle(
+          // Today и Selected будут кастомизированы в calendarBuilders
+          todayDecoration: const BoxDecoration(
+            color: Colors.transparent,
+          ),
+          todayTextStyle: const TextStyle(
+            color: Color(0xFF409187),
+            fontWeight: FontWeight.bold,
+          ),
+          selectedDecoration: const BoxDecoration(
+            color: Colors.transparent,
+          ),
+          selectedTextStyle: const TextStyle(
+            color: Color(0xFF409187),
+            fontWeight: FontWeight.bold,
+          ),
+          defaultTextStyle: TextStyle(
+            color: _monthViewDate.month == DateTime.now().month && _monthViewDate.year == DateTime.now().year
+                ? const Color(0xFF409187) // Текущий месяц - зеленый
+                : Colors.black87, // Другие месяцы - черный
+          ),
+          weekendTextStyle: TextStyle(
+            color: _monthViewDate.month == DateTime.now().month && _monthViewDate.year == DateTime.now().year
+                ? const Color(0xFF409187) // Текущий месяц - зеленый
+                : Colors.black87, // Другие месяцы - черный
+          ),
+          outsideTextStyle: TextStyle(
+            color: Colors.grey.shade400, // Дни других месяцев - серый
+          ),
+          markerDecoration: const BoxDecoration(
+            color: Colors.transparent,
+            shape: BoxShape.circle,
+          ),
+        ),
+        calendarBuilders: CalendarBuilders(
+          todayBuilder: (context, day, focusedDay) {
+            final isSelected = _selectedDay != null &&
+                _selectedDay!.year == day.year &&
+                _selectedDay!.month == day.month &&
+                _selectedDay!.day == day.day;
+            
+            // ПУНКТ 22: Если сегодня выбран - зеленая заливка, иначе серая рамка
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isSelected 
+                  ? const Color(0xFF409187) 
+                  : const Color(0xFF409187).withOpacity( 0.2),
+                border: Border.all(
+                  color: isSelected 
+                    ? const Color(0xFF409187) 
+                    : Colors.grey.shade400,
+                  width: 2,
                 ),
-                calendarBuilders: CalendarBuilders(
-                  todayBuilder: (context, day, focusedDay) {
-                    final bool isSelected =
-                        _selectedDay != null && isSameDay(day, _selectedDay);
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOutCubic,
-                      margin: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? activeColor
-                            : activeColor.withOpacity(0.2),
-                        border: Border.all(
-                          color:
-                              isSelected ? activeColor : Colors.grey.shade400,
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${day.day}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white : activeColor,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  selectedBuilder: (context, day, focusedDay) {
-                    final bool isToday = isSameDay(day, DateTime.now());
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOutCubic,
-                      margin: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: isToday ? activeColor : Colors.transparent,
-                        border: Border.all(color: activeColor, width: 2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${day.day}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isToday ? Colors.white : activeColor,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                headerStyle: const HeaderStyle(
-                  formatButtonVisible: false,
-                  titleCentered: true,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : const Color(0xFF409187),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
+            );
+          },
+          selectedBuilder: (context, day, focusedDay) {
+            final isToday = day.year == DateTime.now().year &&
+                day.month == DateTime.now().month &&
+                day.day == DateTime.now().day;
+            
+            if (isToday) return null; // Используем todayBuilder
+            
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                border: Border.all(
+                  color: const Color(0xFF409187),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${day.day}',
+                  style: const TextStyle(
+                    color: Color(0xFF409187),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          },
+          markerBuilder: (context, day, events) {
+            return null;
+          },
+        ),
+        headerStyle: const HeaderStyle(
+          formatButtonVisible: false, 
+          titleCentered: true,
+        ),
           ),
+        ),
         ),
       ],
     );
@@ -3096,24 +3088,14 @@ Widget _buildModeSwitcher(Color activeColor) {
                 label: 'Показать',
                 textColor: Colors.white,
                 onPressed: () {
-                  final examKeyInstant = '${date.toString()}_${examLesson.time}';
-                  final targetKey = _examLessonKeys[examKeyInstant];
-                  if (targetKey?.currentContext != null) {
-                    Scrollable.ensureVisible(
-                      targetKey!.currentContext!,
+                  // Скроллим к уроку с контрольной
+                  final lessonIndex = daily.lessons.indexOf(examLesson);
+                  if (lessonIndex >= 0) {
+                    _scrollController.animateTo(
+                      lessonIndex * 200.0, // Примерная высота одного урока
                       duration: const Duration(milliseconds: 600),
-                      curve: Curves.easeInOutCubic,
-                      alignment: 0.5,
+                      curve: Curves.easeOutCubic,
                     );
-                  } else {
-                    final lessonIndex = daily.lessons.indexOf(examLesson);
-                    if (lessonIndex >= 0) {
-                      _scrollController.animateTo(
-                        lessonIndex * 200.0,
-                        duration: const Duration(milliseconds: 600),
-                        curve: Curves.easeOutCubic,
-                      );
-                    }
                   }
                 },
               ),
@@ -3129,6 +3111,7 @@ Widget _buildModeSwitcher(Color activeColor) {
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
+        // MIKE: убираем разделительную рамку между банданой и телом карты
       ),
       clipBehavior: Clip.hardEdge, // MIKE: avoid divider lines between bandana and body
       child: Container(
@@ -3200,7 +3183,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                   type: lesson.type, 
                   format: lesson.format,
                   isToday: isToday,
-                  onPowerAppsPressed: () => _showPowerAppsDialog(lesson.deepLink),
+                  onPowerAppsPressed: (link) => _showPowerAppsDialog(link),
                   onTeacherTap: () => _showTeacherInfo(lesson.teacher),
                   examNote: lesson.examNote,
                   shouldPulse: shouldPulse,
@@ -3215,6 +3198,10 @@ Widget _buildModeSwitcher(Color activeColor) {
         ),
       ),
     );
+  }
+
+  Widget _buildWeekDayTimer() {
+    return const SizedBox(width: 32); // MIKE: держим промежуток вместо счётчика уроков
   }
 
   Widget _buildWeekScheduleList() {
@@ -3278,7 +3265,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: isToday ? activeColor.withOpacity( 0.15) : Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(12), // MIKE: радиусы совпадают с телом
             ),
             child: Row(
               children: [
@@ -3292,7 +3279,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                     ),
                   ),
                 ),
-                const SizedBox(width: 32),
+                _buildWeekDayTimer(),
                 const SizedBox(width: 8),
                 Text(
                   _formatDate(dailySchedule.date),
@@ -3354,7 +3341,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                           type: lesson.type,
                           format: lesson.format,
                           isToday: isToday,
-                          onPowerAppsPressed: () => _showPowerAppsDialog(lesson.deepLink),
+                          onPowerAppsPressed: (link) => _showPowerAppsDialog(link),
                           onTeacherTap: () => _showTeacherInfo(lesson.teacher),
                           examNote: lesson.examNote,
                           shouldPulse: shouldPulse,
@@ -3386,7 +3373,7 @@ class LessonTile extends StatefulWidget {
   final LessonType type; 
   final LessonFormat format;
   final bool isToday;
-  final VoidCallback? onPowerAppsPressed;
+  final ValueChanged<String>? onPowerAppsPressed;
   final VoidCallback? onTeacherTap;
   final String? examNote;
   final bool shouldPulse;
@@ -3585,6 +3572,9 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
               const Color.fromARGB(255, 230, 126, 34),
               'Изменение в расписании',
             ),
+            const SizedBox(height: 24),
+            
+            // MIKE: явной кнопки закрытия нет — sheet сворачивается свайпом или тапом вне него
           ],
         ),
       ),
@@ -3731,7 +3721,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                         InkWell(
                           onTap: () => _showLessonTypeBottomSheet(context, typeColor),
                           child: Container(
-                            padding: const EdgeInsets.only(left: 0, right: 8, top: 6, bottom: 6),
+                            padding: const EdgeInsets.only(left: 0, right: 8, top: 6, bottom: 6), // MIKE: выравниваем тип урока строго по левому краю
                             child: Text(
                               formatText,
                               style: const TextStyle(
@@ -3806,14 +3796,14 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                           Icon(style['icon'] as IconData, color: Colors.white, size: 20),
                         if (widget.isToday) ...[
                           const SizedBox(width: 8),
-                          InkWell(
-                            onTap: widget.onPowerAppsPressed,
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity( 0.2),
-                                borderRadius: BorderRadius.circular(6),
+                        InkWell(
+                          onTap: () => widget.onPowerAppsPressed?.call(widget.deepLink), // MIKE: выносим открытие PowerApps в общий диалог
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity( 0.2),
+                              borderRadius: BorderRadius.circular(6),
                               border: Border.all(color: Colors.white, width: 1),
                             ),
                             child: Center(
@@ -3830,9 +3820,9 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                 ),
                                 child: const Icon(Icons.apps, size: 12, color: Colors.white),
                               ),
-                              ),
                             ),
                           ),
+                        ),
                       ],
                     ],
                       ),
@@ -3861,7 +3851,6 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                 // НАЗВАНИЕ ПРЕДМЕТА В РАМКЕ С ИКОНКОЙ
                 GestureDetector(
                   onTap: () {
-                    // Простое нажатие - запускаем анимацию
                     setState(() {
                       _borderLoading = !_borderLoading;
                       debugPrint('EVENT: lesson_title_tap | lesson: ${widget.title} | timestamp: ${DateTime.now()}');
@@ -3885,20 +3874,21 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                       style: BorderLoaderStyle.unidirectional,
                       color: typeColor,
                       child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: typeColor,
-                          width: 2,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: typeColor,
+                            width: 2,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              widget.title,
-                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.title,
+                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -3918,7 +3908,6 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                           ),
                         ],
                       ),
-                    ),
                     ),
                   ),
                 ),
@@ -4467,7 +4456,7 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
     } else {
       // Урок идет
       final elapsed = now.difference(start);
-      _progress = elapsed.inSeconds / total.inSeconds;
+      _progress = (elapsed.inSeconds / total.inSeconds).clamp(0.0, 1.0);
       _currentDuration = _showElapsed ? elapsed : end.difference(now);
     }
   }
@@ -4853,7 +4842,7 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
     _expanded = widget.initiallyExpanded;
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000), // Медленная плавная анимация
+      duration: const Duration(milliseconds: 1000), // MIKE: замедляем раскрытие свёртков до ~1 секунды
     );
     _heightAnimation = CurvedAnimation(
       parent: _controller,
@@ -4905,13 +4894,15 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
       animation: _heightAnimation,
       builder: (ctx, child) {
         // Color.lerp для плавного перехода
-        final bg = widget.isCurrentDay
-            ? Color.lerp(collapsedBg, expandedBg, _heightAnimation.value)!
-            : Colors.white;
+        final bg = widget.isCurrentDay 
+          ? Color.lerp(collapsedBg, expandedBg, _heightAnimation.value) 
+          : Colors.white;
+        
+        // Рамка анимируется вместе с раскрытием
+        final borderWidth = widget.isCurrentDay ? 2.0 : 1.0; // MIKE: зелёная рамка всегда видима для текущего дня
         final borderColor = widget.isCurrentDay
-            ? const Color(0xFF409187)
-            : Colors.grey.shade300;
-        final borderWidth = widget.isCurrentDay ? 2.0 : 1.0;
+          ? const Color(0xFF409187)
+          : Colors.grey.shade300;
         
         return Container(
           key: widget.collapsibleKey,
@@ -5085,7 +5076,6 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..addListener(() {
         if (widget.active && mounted) {
