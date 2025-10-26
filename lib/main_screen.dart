@@ -11,7 +11,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   // 1. Устанавливаем 1, чтобы Расписание открывалось первым
-  int _selectedIndex = 1; 
+  int _selectedIndex = 1;
 
   // Список виджетов, которые будут отображаться на каждой вкладке
   late final List<Widget> _widgetOptions;
@@ -20,13 +20,13 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _widgetOptions = <Widget>[
-      const HomePage(),  // Индекс 0: Главная
-      SchedulePage(),  // Индекс 1: Расписание
+      const HomePage(), // Индекс 0: Главная
+      SchedulePage(), // Индекс 1: Расписание
       // Индекс 2: Чат (Заглушка)
       const Center(
         child: Text(
-          'Чат/Уведомления', 
-          style: TextStyle(fontSize: 24, color: Colors.black54)
+          'Чат/Уведомления',
+          style: TextStyle(fontSize: 24, color: Colors.black54),
         ),
       ),
     ];
@@ -44,29 +44,20 @@ class _MainScreenState extends State<MainScreen> {
 
     return Scaffold(
       // Отображаем выбранную страницу
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _widgetOptions,
-      ),
-      
+      body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
+
       // Нижняя панель навигации
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Главная',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Главная'),
           BottomNavigationBarItem(
             icon: Icon(Icons.schedule),
             label: 'Расписание',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.message),
-            label: 'Чат',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Чат'),
         ],
-        currentIndex: _selectedIndex, 
-        selectedItemColor: primaryColor, 
+        currentIndex: _selectedIndex,
+        selectedItemColor: primaryColor,
         unselectedItemColor: Colors.grey,
         onTap: _onItemTapped,
       ),

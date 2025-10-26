@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 // 1. Enum для типов занятий (УРГЕНТНОСТЬ/ЛОКАЦИЯ)
 enum LessonType {
   regular, // Обычное занятие
-  online,  // Дистанционное (Zoom)
-  exam,    // Экзамен
+  online, // Дистанционное (Zoom)
+  exam, // Экзамен
   changed, // Возможно, поменяется (оранжевый)
 }
 
@@ -22,8 +22,8 @@ class Lesson {
   final String teacher;
   final String classroom;
   final Color baseColor; // Светлый цвет предмета (для фона)
-  final LessonType type; 
-  final LessonFormat format; 
+  final LessonType type;
+  final LessonFormat format;
 
   const Lesson({
     required this.time,
@@ -31,7 +31,7 @@ class Lesson {
     required this.teacher,
     required this.classroom,
     required this.baseColor,
-    this.type = LessonType.regular, 
+    this.type = LessonType.regular,
     this.format = LessonFormat.lecture,
   });
 }

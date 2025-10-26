@@ -10,7 +10,10 @@ class HomePage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Главная', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Главная',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: primaryColor,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
@@ -18,16 +21,24 @@ class HomePage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.school, size: 80, color: primaryColor.withValues(alpha: 0.7)),
+            Icon(
+              Icons.school,
+              size: 80,
+              color: primaryColor.withValues(alpha: 0.7),
+            ),
             const SizedBox(height: 25),
             Text(
-              'Сегодня ${DateTime.now().day}.${DateTime.now().month}.${DateTime.now().year} г.', 
-              style: TextStyle(fontSize: 18, color: Colors.grey[700], fontWeight: FontWeight.w600)
+              'Сегодня ${DateTime.now().day}.${DateTime.now().month}.${DateTime.now().year} г.',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 5),
             const Text(
-              'Выберите "Расписание" внизу для просмотра занятий.', 
-              style: TextStyle(fontSize: 16, color: Colors.black54)
+              'Выберите "Расписание" внизу для просмотра занятий.',
+              style: TextStyle(fontSize: 16, color: Colors.black54),
             ),
           ],
         ),

@@ -7,6 +7,8 @@ import 'package:vibration/vibration.dart';
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui';
+import 'widgets/border_painters.dart';
+import 'widgets/border_loader_button.dart';
 
 enum LessonType { regular, online, exam, changed }
 enum LessonFormat { lecture, practice, lab }
@@ -68,7 +70,7 @@ class _BorderLoadingPainter extends CustomPainter {
     
     // Рисуем свечение (glow effect)
     final glowPaint = Paint()
-      ..color = color.withValues(alpha: 0.3)
+      ..color = color.withOpacity( 0.3)
       ..strokeWidth = 6
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
@@ -82,7 +84,7 @@ class _BorderLoadingPainter extends CustomPainter {
     final mainPaint = Paint()
       ..shader = LinearGradient(
         colors: [
-          color.withValues(alpha: 0.4),
+          color.withOpacity( 0.4),
           color,
           color,
         ],
@@ -105,7 +107,7 @@ class _BorderLoadingPainter extends CustomPainter {
         canvas.drawCircle(dotPosition, 2.5, dotPaint);
         
         final dotGlowPaint = Paint()
-          ..color = color.withValues(alpha: 0.5)
+          ..color = color.withOpacity( 0.5)
           ..style = PaintingStyle.fill
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
         canvas.drawCircle(dotPosition, 4, dotGlowPaint);
@@ -689,6 +691,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
   final Set<String> _viewedExams = {}; // Отслеживание просмотренных контрольных
   final Set<String> _seenExamDates = {}; // ПУНКТ 9: Отслеживание показанных SnackBar для контрольных
   final Set<String> _openedOnlineLinks = {}; // ПУНКТ 13: Отслеживание открытых онлайн-ссылок
+  final Set<String> _vibrationFiredForDate = {}; // ПУНКТ 8: Debounce вибрации
   Timer? _snackbarDebounceTimer;
   final ScrollController _scrollController = ScrollController();
   bool _isFirstLaunch = true; // Флаг первого запуска
@@ -865,7 +868,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                           height: 40,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isPrevWeekCurrent ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+                            color: isPrevWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
                             border: Border.all(
                               color: isPrevWeekCurrent ? activeColor : Colors.grey.shade300,
                               width: 2,
@@ -910,7 +913,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                           height: 40,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isNextWeekCurrent ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+                            color: isNextWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
                             border: Border.all(
                               color: isNextWeekCurrent ? activeColor : Colors.grey.shade300,
                               width: 2,
@@ -949,7 +952,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                       Color backgroundColor;
 
                       // Фон всегда на текущем дне (isToday)
-                      backgroundColor = isToday ? activeColor.withValues(alpha: 0.2) : Colors.transparent;
+                      backgroundColor = isToday ? activeColor.withOpacity( 0.2) : Colors.transparent;
                       
                       // Обводка на выбранном дне (isCurrentDate)
                       if (isCurrentDate) {
@@ -1201,7 +1204,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                           decoration: BoxDecoration(
-                            color: isRealCurrentWeek ? activeColor.withValues(alpha: 0.1) : Colors.transparent,
+                            color: isRealCurrentWeek ? activeColor.withOpacity( 0.1) : Colors.transparent,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: isSelectedWeek ? activeColor : (isRealCurrentWeek ? Colors.grey.shade400 : Colors.grey.shade400),
@@ -1430,7 +1433,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
+      barrierColor: Colors.black.withOpacity( 0.6),
       builder: (context) => GestureDetector(
         onTap: () => Navigator.pop(context),
         child: Material(
@@ -1446,7 +1449,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
+                      color: Colors.black.withOpacity( 0.2),
                       blurRadius: 20,
                       offset: const Offset(0, 10),
                     ),
@@ -1507,7 +1510,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
       context: context,
       barrierDismissible: true,
       barrierLabel: '',
-      barrierColor: Colors.black.withValues(alpha: 0.5),
+      barrierColor: Colors.black.withOpacity( 0.5),
       transitionDuration: const Duration(milliseconds: 300),
       pageBuilder: (context, animation, secondaryAnimation) {
         return StatefulBuilder(
@@ -1527,7 +1530,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
+                            color: Colors.black.withOpacity( 0.2),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -1545,7 +1548,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                                   height: 36,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: const Color(0xFF409187).withValues(alpha: 0.1),
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
                                   ),
                                   child: const Icon(Icons.chevron_left, color: Color(0xFF409187)),
                                 ),
@@ -1578,7 +1581,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                                   height: 36,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: const Color(0xFF409187).withValues(alpha: 0.1),
+                                    color: const Color(0xFF409187).withOpacity( 0.1),
                                   ),
                                   child: const Icon(Icons.chevron_right, color: Color(0xFF409187)),
                                 ),
@@ -1629,7 +1632,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                                     border: Border.all(
                                       color: isSelected 
                                           ? const Color(0xFF409187)
-                                          : (isCurrentYear ? const Color(0xFF409187).withValues(alpha: 0.3) : Colors.grey.shade300),
+                                          : (isCurrentYear ? const Color(0xFF409187).withOpacity( 0.3) : Colors.grey.shade300),
                                       width: isSelected ? 2 : 1,
                                     ),
                                   ),
@@ -1666,7 +1669,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
+      barrierColor: Colors.black.withOpacity( 0.6),
       builder: (context) => GestureDetector(
         onTap: () => Navigator.pop(context),
         child: Material(
@@ -1682,7 +1685,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
+                      color: Colors.black.withOpacity( 0.2),
                       blurRadius: 20,
                       offset: const Offset(0, 10),
                     ),
@@ -1697,7 +1700,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                           width: 70,
                           height: 70,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF409187).withValues(alpha: 0.1),
+                            color: const Color(0xFF409187).withOpacity( 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Icon(
@@ -1731,7 +1734,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
                                   content: Text('Почта скопирована: $email'),
                                   duration: const Duration(seconds: 2),
                                   behavior: SnackBarBehavior.floating,
-                                  backgroundColor: const Color(0xFF409187).withValues(alpha: 0.9),
+                                  backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                   margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
                                 ),
@@ -1817,10 +1820,10 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF409187).withValues(alpha: 0.1),
+          color: const Color(0xFF409187).withOpacity( 0.1),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: const Color(0xFF409187).withValues(alpha: 0.3),
+            color: const Color(0xFF409187).withOpacity( 0.3),
             width: 1,
           ),
         ),
@@ -2176,7 +2179,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
         ),
         duration: const Duration(seconds: 5),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF409187).withValues(alpha: 0.9),
+        backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
       ),
@@ -2193,7 +2196,7 @@ class _SchedulePageState extends State<SchedulePage> with TickerProviderStateMix
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: const Color(0xFF409187).withValues(alpha: 0.18),
+            backgroundColor: const Color(0xFF409187).withOpacity( 0.18),
             content: Text('Открывается ссылка: $classroom'),
             action: SnackBarAction(
               label: 'Перейти',
@@ -2513,7 +2516,7 @@ Widget _buildModeSwitcher(Color activeColor) {
       // Текущий день = зеленый текст + зеленая обводка + зеленый фон
       textColor = activeColor;
       borderColor = activeColor;
-      backgroundColor = activeColor.withValues(alpha: 0.2);
+      backgroundColor = activeColor.withOpacity( 0.2);
     } else if (isCurrentMonth) {
       // Другие дни текущего месяца = зеленый текст + серая обводка
       textColor = activeColor;
@@ -2544,7 +2547,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isPrevDayToday ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+              color: isPrevDayToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
               border: Border.all(
                 color: isPrevDayToday ? activeColor : Colors.grey.shade300,
                 width: 2,
@@ -2627,7 +2630,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isNextDayToday ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+              color: isNextDayToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
               border: Border.all(
                 color: isNextDayToday ? activeColor : Colors.grey.shade300,
                 width: 2,
@@ -2708,7 +2711,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                           today.isBefore(endOfWeek.add(const Duration(days: 1)));
 
     final color = isCurrentWeek ? activeColor : greyColor;
-    final fillColor = isCurrentWeek ? activeColor.withValues(alpha: 0.2) : Colors.transparent;
+    final fillColor = isCurrentWeek ? activeColor.withOpacity( 0.2) : Colors.transparent;
 
     // Определяем цвета для начала и конца недели
     final startIsCurrentMonth = startOfWeek.month == currentMonth && startOfWeek.year == currentYear;
@@ -2736,7 +2739,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isPrevWeekCurrent ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+              color: isPrevWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
               border: Border.all(
                 color: isPrevWeekCurrent ? activeColor : Colors.grey.shade300,
                 width: 2,
@@ -2842,7 +2845,7 @@ Widget _buildModeSwitcher(Color activeColor) {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isNextWeekCurrent ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+              color: isNextWeekCurrent ? activeColor.withOpacity( 0.2) : Colors.transparent,
               border: Border.all(
                 color: isNextWeekCurrent ? activeColor : Colors.grey.shade300,
                 width: 2,
@@ -2923,9 +2926,9 @@ Widget _buildModeSwitcher(Color activeColor) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity( 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3), width: 1),
+        border: Border.all(color: color.withOpacity( 0.3), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -3022,7 +3025,7 @@ Widget _buildModeSwitcher(Color activeColor) {
                   
                   if (isCurrentMonth) {
                     // Текущий месяц: яркий зеленый фон + зеленая обводка + зеленый текст
-                    backgroundColor = const Color(0xFF409187).withValues(alpha: 0.2);
+                    backgroundColor = const Color(0xFF409187).withOpacity( 0.2);
                     borderColor = const Color(0xFF409187);
                     textColor = const Color(0xFF409187);
                   } else if (isCurrentYear) {
@@ -3180,7 +3183,7 @@ Widget _buildModeSwitcher(Color activeColor) {
               decoration: BoxDecoration(
                 color: isSelected 
                   ? const Color(0xFF409187) 
-                  : const Color(0xFF409187).withValues(alpha: 0.2),
+                  : const Color(0xFF409187).withOpacity( 0.2),
                 border: Border.all(
                   color: isSelected 
                     ? const Color(0xFF409187) 
@@ -3276,7 +3279,7 @@ Widget _buildModeSwitcher(Color activeColor) {
               content: Text(examLesson.examNote ?? 'Контрольная'),
               duration: const Duration(seconds: 5),
               behavior: SnackBarBehavior.floating,
-              backgroundColor: const Color(0xFF409187).withValues(alpha: 0.9),
+              backgroundColor: const Color(0xFF409187).withOpacity( 0.9),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
               action: SnackBarAction(
@@ -3306,7 +3309,7 @@ Widget _buildModeSwitcher(Color activeColor) {
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: const Color(0xFF409187).withValues(alpha: 0.3), width: 2),
+        side: BorderSide(color: const Color(0xFF409187).withOpacity( 0.3), width: 2),
       ),
       child: Container(
         height: MediaQuery.of(context).size.height * 0.65,
@@ -3401,7 +3404,7 @@ Widget _buildModeSwitcher(Color activeColor) {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: isToday ? activeColor.withValues(alpha: 0.2) : Colors.transparent,
+          color: isToday ? activeColor.withOpacity( 0.2) : Colors.transparent,
           shape: BoxShape.circle,
           border: Border.all(
             color: isToday ? activeColor : Colors.grey.shade400,
@@ -3442,7 +3445,9 @@ Widget _buildModeSwitcher(Color activeColor) {
              date.isBefore(endOfWeek.add(const Duration(days: 1)));
     }).toList();
 
+    // ПУНКТ 12: PageStorageKey для сохранения состояния при переключении режимов
     return Column(
+      key: PageStorageKey('week_list_${_currentWeekDate.toIso8601String()}'),
       children: weekSchedule.map((dailySchedule) {
         final normalizedDate = _normalizeDate(dailySchedule.date);
         final isToday = normalizedDate == today;
@@ -3450,20 +3455,26 @@ Widget _buildModeSwitcher(Color activeColor) {
         final tileKeyStr = '${dailySchedule.date}';
         final globalKey = _tileKeys.putIfAbsent(tileKeyStr, () => GlobalKey());
 
-        // ПУНКТ 1: Используем новый WeekCollapsible вместо ExpansionTile
-        return WeekCollapsible(
-          key: ValueKey('collapsible_${dailySchedule.date}'),
+        // ПУНКТ 12: KeyedSubtree для стабильности при rebuild
+        return KeyedSubtree(
+          key: ValueKey(dailySchedule.date.toIso8601String()),
+          child: WeekCollapsible(
+            key: ValueKey('collapsible_${dailySchedule.date}'),
           collapsibleKey: globalKey,
           isCurrentDay: isToday, // ПУНКТ 1: Передаём флаг текущего дня
           initiallyExpanded: _expandedTiles.contains(tileKeyStr),
           onExpansionChanged: (expanded) async {
             if (expanded) {
               setState(() => _expandedTiles.add(tileKeyStr));
-              // Вибрация при открытии дня с контрольной
+              // ПУНКТ 8: Вибрация ТОЛЬКО при раскрытии дня с контрольной + debounce
               final hasExam = dailySchedule.lessons.any((l) => l.examNote != null);
-              if (hasExam) {
+              if (hasExam && !_vibrationFiredForDate.contains(tileKeyStr)) {
                 final hasVibrator = await Vibration.hasVibrator() ?? false;
-                if (hasVibrator) Vibration.vibrate(duration: 50);
+                if (hasVibrator) {
+                  Vibration.vibrate(duration: 160);
+                  _vibrationFiredForDate.add(tileKeyStr);
+                  debugPrint('VIBRATION: fired | date: $tileKeyStr | hasExam: true');
+                }
               }
             } else {
               setState(() => _expandedTiles.remove(tileKeyStr));
@@ -3482,7 +3493,7 @@ Widget _buildModeSwitcher(Color activeColor) {
           header: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isToday ? activeColor.withValues(alpha: 0.15) : Colors.white,
+              color: isToday ? activeColor.withOpacity( 0.15) : Colors.white,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
@@ -3570,9 +3581,11 @@ Widget _buildModeSwitcher(Color activeColor) {
                     ),
                   );
                 }).toList(),
+          ), // ПУНКТ 12: Закрываем WeekCollapsible
+        ), // ПУНКТ 12: Закрываем KeyedSubtree
         );
       }).toList(),
-    );
+    ); // ПУНКТ 12: Закрываем Column с PageStorageKey
   }
 
 
@@ -3986,7 +3999,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                     content: Text('Открывается: ${widget.classroom}'),
                                     duration: const Duration(seconds: 2),
                                     behavior: SnackBarBehavior.floating,
-                                    backgroundColor: const Color(0xFF409187).withValues(alpha: 0.85),
+                                    backgroundColor: const Color(0xFF409187).withOpacity( 0.85),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                     margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
                                   ),
@@ -3996,7 +4009,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                 width: 24,
                                 height: 24,
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
+                                  color: Colors.white.withOpacity( 0.2),
                                   borderRadius: BorderRadius.circular(4),
                                   border: Border.all(color: Colors.white, width: 1),
                                 ),
@@ -4087,7 +4100,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                             width: 28,
                             height: 28,
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
+                              color: Colors.white.withOpacity( 0.2),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(color: Colors.white, width: 1),
                             ),
@@ -4244,7 +4257,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                                     content: Text('Открывается: ${widget.classroom}'),
                                     duration: const Duration(seconds: 3),
                                     behavior: SnackBarBehavior.floating,
-                                    backgroundColor: const Color(0xFF409187).withValues(alpha: 0.85),
+                                    backgroundColor: const Color(0xFF409187).withOpacity( 0.85),
                                     dismissDirection: DismissDirection.down,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
@@ -4296,7 +4309,7 @@ class _LessonTileState extends State<LessonTile> with TickerProviderStateMixin {
                     padding: const EdgeInsets.all(12),
                     clipBehavior: Clip.hardEdge,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF409187).withValues(alpha: 0.15),
+                      color: const Color(0xFF409187).withOpacity( 0.15),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFF409187), width: 2),
                     ),
@@ -4423,7 +4436,7 @@ class _LessonTimerState extends State<LessonTimer> {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Детали урока',
-      barrierColor: Colors.black.withValues(alpha: 0.7),
+      barrierColor: Colors.black.withOpacity( 0.7),
       transitionDuration: const Duration(milliseconds: 300),
       pageBuilder: (context, anim1, anim2) {
         return Container();
@@ -4458,7 +4471,7 @@ class _LessonTimerState extends State<LessonTimer> {
           painter: _CircleProgressPainter(
             progress: _progress,
             progressColor: widget.color,
-            bgColor: widget.color.withValues(alpha: 0.2),
+            bgColor: widget.color.withOpacity( 0.2),
             strokeWidth: 2,
           ),
           child: Center(
@@ -4627,7 +4640,7 @@ class _LessonDetailDialogState extends State<LessonDetailDialog> {
               child: LinearProgressIndicator(
                 value: widget.progress,
                 minHeight: 12,
-                backgroundColor: widget.color.withValues(alpha: 0.2),
+                backgroundColor: widget.color.withOpacity( 0.2),
                 valueColor: AlwaysStoppedAnimation<Color>(widget.color),
               ),
             ),
@@ -4644,7 +4657,7 @@ class _LessonDetailDialogState extends State<LessonDetailDialog> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 decoration: BoxDecoration(
-                  color: widget.color.withValues(alpha: 0.1),
+                  color: widget.color.withOpacity( 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: widget.color, width: 2),
                 ),
@@ -4844,9 +4857,9 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
                   key: ValueKey(_showElapsed),
                   value: _showElapsed ? _progress : (1.0 - _progress),
                   minHeight: 12,
-                  backgroundColor: widget.color.withValues(alpha: 0.2),
+                  backgroundColor: widget.color.withOpacity( 0.2),
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    _showElapsed ? widget.color : widget.color.withValues(alpha: 0.6)
+                    _showElapsed ? widget.color : widget.color.withOpacity( 0.6)
                   ),
                 ),
               ),
@@ -4864,7 +4877,7 @@ class _LessonDetailsDialogState extends State<LessonDetailsDialog> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 decoration: BoxDecoration(
-                  color: widget.color.withValues(alpha: 0.1),
+                  color: widget.color.withOpacity( 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: widget.color, width: 2),
                 ),
@@ -4992,7 +5005,7 @@ class _TimerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bg = Paint()..color = const Color(0xFF409187).withValues(alpha: 0.18);
+    final bg = Paint()..color = const Color(0xFF409187).withOpacity( 0.18);
     final fg = Paint()..color = showRemaining ? Colors.lightGreen : const Color(0xFF409187);
     final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(8));
     canvas.drawRRect(rrect, bg);
@@ -5171,7 +5184,7 @@ class _WeekDayTimerWidgetState extends State<_WeekDayTimerWidget> {
         painter: _CircleProgressPainter(
           progress: _progress,
           progressColor: widget.activeColor,
-          bgColor: widget.activeColor.withValues(alpha: 0.3),
+          bgColor: widget.activeColor.withOpacity( 0.3),
           strokeWidth: 2.0,
         ),
         child: Center(
@@ -5271,53 +5284,57 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    // ПУНКТЫ 1 & 2: Фон и рамка только для текущего дня
-    final bgColor = widget.isCurrentDay
-      ? (_expanded 
-          ? const Color(0xFF409187).withValues(alpha: 0.18) 
-          : const Color(0xFF409187).withValues(alpha: 0.10))
-      : Colors.white;
+    // ПУНКТЫ 1-4: Правильная логика фона и рамки
+    // Светло-зелёный когда закрыт, тёмно-зелёный когда раскрыт
+    const collapsedBg = Color(0xFFDFF6EE); // Светлый зелёный
+    const expandedBg = Color(0xFF2E8B57); // Тёмный зелёный
     
-    final borderColor = widget.isCurrentDay
-      ? const Color(0xFF409187)
-      : Colors.grey.shade400;
-    
-    return AnimatedContainer(
-      key: widget.collapsibleKey,
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeInOutCubic,
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor, width: 2),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 6,
-            offset: Offset(0, 2),
+    return AnimatedBuilder(
+      animation: _heightAnimation,
+      builder: (ctx, child) {
+        // Color.lerp для плавного перехода
+        final bg = widget.isCurrentDay 
+          ? Color.lerp(collapsedBg, expandedBg, _heightAnimation.value) 
+          : Colors.white;
+        
+        // Рамка анимируется вместе с раскрытием
+        final borderOpacity = widget.isCurrentDay ? _heightAnimation.value : 0.0;
+        final borderWidth = widget.isCurrentDay ? (2.0 * _heightAnimation.value) : 1.0;
+        final borderColor = widget.isCurrentDay 
+          ? const Color(0xFF409187).withOpacity(0.3 + 0.7 * _heightAnimation.value)
+          : Colors.grey.shade300;
+        
+        return Container(
+          key: widget.collapsibleKey,
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: borderWidth),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: _toggle,
-            borderRadius: BorderRadius.circular(20),
-            child: widget.header,
-          ),
-          SizeTransition(
-            sizeFactor: _heightAnimation,
-            axisAlignment: -1.0,
-            child: Container(
-              // ПУНКТ 26: Зелёный фон внутренней области
-              color: _expanded 
-                ? const Color(0xFF409187).withValues(alpha: 0.08)
-                : Colors.transparent,
-              child: Column(
-                children: [
-                // Staggered контент
-                ...widget.children,
+          clipBehavior: Clip.hardEdge, // ПУНКТ 2: Убрать bleeding
+          child: Column(
+            children: [
+              InkWell(
+                onTap: _toggle,
+                child: widget.header,
+              ),
+              SizeTransition(
+                sizeFactor: _heightAnimation,
+                axisAlignment: -1.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  child: Column(
+                    children: [
+                      // Staggered контент
+                      ...widget.children,
                 // Кнопка сворачивания внизу
                 if (_expanded)
                   Padding(
@@ -5329,7 +5346,7 @@ class _WeekCollapsibleState extends State<WeekCollapsible> with SingleTickerProv
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF409187).withValues(alpha: 0.1),
+                            color: const Color(0xFF409187).withOpacity( 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: const Color(0xFF409187), width: 1),
                           ),
@@ -5496,194 +5513,16 @@ class _BorderLoaderWidgetState extends State<BorderLoaderWidget> with SingleTick
   }
 
   CustomPainter _getBorderPainter() {
-    switch (widget.style) {
-      case BorderLoaderStyle.unidirectional:
-        return _BorderLoaderPainterA(
-          progress: widget.active ? _controller.value : 0.0,
-          color: widget.color,
-        );
-      case BorderLoaderStyle.bidirectional:
-        return _BorderLoaderPainterB(
-          progress: widget.active ? _controller.value : 0.0,
-          color: widget.color,
-        );
-      case BorderLoaderStyle.marching:
-        return _BorderLoaderPainterC(
-          progress: widget.active ? _controller.value : 0.0,
-          color: widget.color,
-        );
-    }
-  }
-}
-
-// Вариант A: Однонаправленный бегущий свет (текущий)
-class _BorderLoaderPainterA extends CustomPainter {
-  final double progress;
-  final Color color;
-
-  _BorderLoaderPainterA({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(8),
+    final bool isHighlighted = widget.isCurrentDay; // Используем существующее свойство
+    final Color borderColor = Colors.green; // Фиксированный цвет
+    
+    // Возвращаем стандартный painter, так как другие стили не используются в WeekCollapsible
+    return BorderLoaderPainterA(
+      progress: isHighlighted ? _controller.value : 0.0,
+      color: borderColor,
     );
-
-    final path = Path()..addRRect(rect);
-    final pathMetrics = path.computeMetrics().first;
-    final totalLength = pathMetrics.length;
-    
-    // Glow effect
-    final glowPaint = Paint()
-      ..color = color.withValues(alpha: 0.3)
-      ..strokeWidth = 6
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    
-    final currentLength = totalLength * progress;
-    final glowPath = pathMetrics.extractPath(0, currentLength);
-    canvas.drawPath(glowPath, glowPaint);
-    
-    // Main line with gradient
-    final mainPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          color.withValues(alpha: 0.4),
-          color,
-          color,
-        ],
-        stops: const [0.0, 0.7, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final extractPath = pathMetrics.extractPath(0, currentLength);
-    canvas.drawPath(extractPath, mainPaint);
-    
-    // Leading dot
-    if (progress > 0 && progress < 1) {
-      final dotPosition = pathMetrics.getTangentForOffset(currentLength)?.position;
-      if (dotPosition != null) {
-        final dotPaint = Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.fill;
-        canvas.drawCircle(dotPosition, 2.5, dotPaint);
-        
-        final dotGlowPaint = Paint()
-          ..color = color.withValues(alpha: 0.5)
-          ..style = PaintingStyle.fill
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-        canvas.drawCircle(dotPosition, 4, dotGlowPaint);
-      }
-    }
   }
-
-  @override
-  bool shouldRepaint(_BorderLoaderPainterA oldDelegate) {
-    return oldDelegate.progress != progress;
   }
 }
 
-// Вариант B: Двунаправленный gradient sweep
-class _BorderLoaderPainterB extends CustomPainter {
-  final double progress;
-  final Color color;
-
-  _BorderLoaderPainterB({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(8),
-    );
-
-    final path = Path()..addRRect(rect);
-    final pathMetrics = path.computeMetrics().first;
-    final totalLength = pathMetrics.length;
-    
-    // Двунаправленный эффект: от центра к краям
-    final centerProgress = (progress * 2).clamp(0.0, 1.0);
-    final halfLength = totalLength / 2;
-    
-    // Первая половина (по часовой)
-    final length1 = halfLength * centerProgress;
-    final path1 = pathMetrics.extractPath(halfLength, halfLength + length1);
-    
-    // Вторая половина (против часовой)
-    final length2 = halfLength * centerProgress;
-    final path2 = pathMetrics.extractPath(halfLength - length2, halfLength);
-    
-    final paint = Paint()
-      ..shader = SweepGradient(
-        colors: [
-          color.withValues(alpha: 0.2),
-          color,
-          color.withValues(alpha: 0.2),
-        ],
-        stops: const [0.0, 0.5, 1.0],
-        transform: GradientRotation(progress * 2 * math.pi),
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawPath(path1, paint);
-    canvas.drawPath(path2, paint);
-  }
-
-  @override
-  bool shouldRepaint(_BorderLoaderPainterB oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
-}
-
-// Вариант C: Марширующий пунктир
-class _BorderLoaderPainterC extends CustomPainter {
-  final double progress;
-  final Color color;
-
-  _BorderLoaderPainterC({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(8),
-    );
-
-    final path = Path()..addRRect(rect);
-    final pathMetrics = path.computeMetrics().first;
-    final totalLength = pathMetrics.length;
-    
-    // Марширующий пунктир
-    final dashLength = 10.0;
-    final gapLength = 5.0;
-    final offset = progress * (dashLength + gapLength);
-    
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    double distance = -offset;
-    while (distance < totalLength) {
-      if (distance >= 0) {
-        final start = distance;
-        final end = (distance + dashLength).clamp(0.0, totalLength);
-        final dashPath = pathMetrics.extractPath(start, end);
-        canvas.drawPath(dashPath, paint);
-      }
-      distance += dashLength + gapLength;
-    }
-  }
-
-  @override
-  bool shouldRepaint(_BorderLoaderPainterC oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
-}
+// Painter классы вынесены в widgets/border_painters.dart
